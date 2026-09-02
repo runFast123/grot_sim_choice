@@ -25,6 +25,8 @@ SESSION_FILE = os.path.join(BASE_DIR, ".choice_session.json")
 DEFAULT_BASE_URL = BASE_URL_OMNE
 
 # In-memory session store & client
+scrip_master = None
+choice_client = None
 auth_state = {
     "logged_in": False,
     "vendor_id": os.environ.get("CHOICE_VENDOR_ID", ""),

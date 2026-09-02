@@ -3,105 +3,251 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>GROT Dynamic Ladder Simulator · Choice OpenAPI</title>
+  <title>GROT Scalper · Dynamic Ladder Simulator</title>
   <style>
-    :root{--bg:#07111f;--panel:#0e1b2d;--panel2:#12233a;--line:#263b55;--text:#eef5ff;--muted:#90a4bc;--green:#20d68f;--red:#ff5d6c;--yellow:#ffd166;--blue:#43a5ff}
-    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#06101d,#0a1830);color:var(--text);font:14px Inter,Segoe UI,Arial,sans-serif;min-height:100vh}
-    header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--line);background:#081424dd;position:sticky;top:0;z-index:10}
-    h1{font-size:18px;margin:0;display:flex;align-items:center;gap:8px}.tag{color:var(--blue);font-weight:700}.status{padding:6px 12px;border-radius:20px;background:#17283d;color:var(--muted);font-size:13px}
-    .header-actions{display:flex;align-items:center;gap:10px}
-    .api-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:#102238;transition:.15s;user-select:none}
-    .api-badge:hover{transform:translateY(-1px);box-shadow:0 0 12px rgba(67,165,255,0.35);border-color:var(--blue)}
-    .api-badge.connected{background:#0e382b;color:var(--green);border-color:#1c7056}
-    .api-badge.disconnected{background:#3b1c24;color:var(--red);border-color:#7a2e3e}
-    main{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;max-width:1600px;margin:auto}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 12px 35px #0004}
-    .controls{display:flex;flex-direction:column;gap:12px}.section{border-top:1px solid var(--line);padding-top:12px}.section:first-child{border:0;padding-top:0}.section-title{font-size:12px;color:var(--blue);font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center}
-    .tabs{display:flex;gap:4px;background:#091627;padding:3px;border-radius:8px;margin-bottom:8px}
-    .tab{flex:1;text-align:center;padding:6px;font-size:12px;cursor:pointer;border-radius:6px;color:var(--muted);font-weight:600}
-    .tab.active{background:var(--blue);color:#04101d}
-    label{display:block;color:var(--muted);font-size:12px;margin:6px 0 4px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}input,select,button{width:100%;border:1px solid var(--line);border-radius:8px;background:#091627;color:var(--text);padding:9px;font:inherit}input[type=file]{padding:7px}button{cursor:pointer;font-weight:750;transition:.15s}button:hover{transform:translateY(-1px);border-color:var(--blue)}button.primary{background:var(--blue);color:#04101d;border-color:var(--blue)}button.buy{background:#123f35;color:var(--green);border-color:#1d725c}button.sell{background:#48242d;color:#ff8d98;border-color:#803846}button.warn{color:var(--yellow)}button:disabled{opacity:.4;cursor:not-allowed;transform:none}.button-row{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
-    .workspace{display:flex;flex-direction:column;gap:16px;min-width:0}.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}.stat span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase}.stat strong{display:block;margin-top:5px;font-size:18px}.green{color:var(--green)!important}.red{color:var(--red)!important}.yellow{color:var(--yellow)!important}
-    .chart-wrap{height:480px;position:relative;padding:0;overflow:hidden}canvas{width:100%;height:100%;display:block}.empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);text-align:center;padding:40px;pointer-events:none;background:#07111fee}.legend{position:absolute;top:10px;left:12px;background:#07111fbb;padding:7px 10px;border-radius:8px;color:var(--muted)}
-    .bottom{display:grid;grid-template-columns:1fr 1fr;gap:16px}.table-wrap{max-height:260px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}th{position:sticky;top:0;background:var(--panel);color:var(--muted)}.note{font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px}.advanced-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.metric{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px}.metric span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase}.metric strong{display:block;font-size:16px;margin-top:5px}.equity-wrap{height:230px;position:relative}
-    
-    /* Autocomplete list */
+    :root{
+      --bg:#070b14;--panel:#101a2b;--panel2:#152238;--panel-inner:#0b1422;--line:#2a3f5c;--line-soft:#1d2e45;
+      --text:#f3f7ff;--muted:#8ea3bb;--muted-2:#6d829c;--green:#22c55e;--red:#f43f5e;--yellow:#fbbf24;--blue:#38bdf8;
+      --accent:#6366f1;--radius:14px;--shadow:0 18px 40px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100vh;overflow-x:hidden}
+    body{
+      background:radial-gradient(1200px 500px at 12% -10%,#163056 0%,transparent 55%),linear-gradient(180deg,#08111e,#070b14 40%);
+      color:var(--text);font:14px/1.45 "Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+    }
+    button,input,select{font:inherit}
+    :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+
+    header{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:nowrap;
+      padding:10px 20px;border-bottom:1px solid var(--line-soft);background:rgba(8,16,30,.88);
+      backdrop-filter:blur(16px);position:sticky;top:0;z-index:30;
+    }
+    .brand{display:flex;align-items:center;gap:10px;min-width:0}
+    .brand-mark{
+      width:36px;height:36px;border-radius:11px;display:grid;place-items:center;flex:none;
+      background:linear-gradient(135deg,#38bdf8,#6366f1);color:#04101d;font-weight:800;font-size:16px;
+    }
+    h1{margin:0;font-size:16px;font-weight:800;letter-spacing:-.02em;display:flex;flex-direction:column;gap:1px;line-height:1.15}
+    .brand-sub{font-size:11px;color:var(--muted);font-weight:600}
+    .tag{color:#04101d;display:none}
+    .header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .status{
+      padding:7px 12px;border-radius:999px;background:#122033;color:var(--muted);font-size:12px;font-weight:600;
+      max-width:min(380px,38vw);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line-soft);
+    }
+    .api-badge{
+      display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;font-size:12px;font-weight:700;
+      cursor:pointer;border:1px solid var(--line);background:#122033;color:var(--text);width:auto;transition:.15s;user-select:none;
+    }
+    .api-badge:hover{border-color:var(--blue);transform:translateY(-1px)}
+    .api-badge.connected{background:rgba(34,197,94,.12);color:var(--green);border-color:rgba(34,197,94,.35)}
+    .api-badge.disconnected{background:rgba(244,63,94,.12);color:#fda4af;border-color:rgba(244,63,94,.35)}
+    .api-badge::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 4px color-mix(in srgb,currentColor 18%,transparent)}
+
+    main{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px;max-width:1680px;margin:0 auto}
+    .panel{background:rgba(16,26,43,.86);border:1px solid var(--line-soft);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+    .controls{display:flex;flex-direction:column;gap:14px;position:sticky;top:72px;max-height:calc(100vh - 88px);overflow:auto;padding-right:4px}
+    .section{border-top:1px solid var(--line-soft);padding-top:14px}
+    .section:first-child{border:0;padding-top:0}
+    .section-title{font-size:11px;color:var(--blue);font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .section-kicker{color:var(--muted-2);font-weight:650;text-transform:none;letter-spacing:0;font-size:11px}
+
+    .auth-card,.hint-card{
+      display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;padding:10px 12px;
+      background:var(--panel-inner);border:1px solid var(--line-soft);border-radius:12px;
+    }
+    .hint-card{display:block;color:var(--muted);font-size:12px;line-height:1.5;margin-bottom:0}
+    .hint-card b{color:var(--text)}
+    .flow-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px}
+    .flow-steps span{display:flex;align-items:center;justify-content:center;gap:6px;padding:7px 6px;border-radius:999px;background:var(--panel-inner);border:1px solid var(--line-soft);color:var(--muted);font-size:10px;font-weight:700}
+    .flow-steps span.done{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.08)}
+
+    .tabs{display:flex;gap:4px;background:var(--panel-inner);padding:4px;border-radius:12px;margin-bottom:10px}
+    .tab{flex:1;text-align:center;padding:8px 6px;font-size:12px;cursor:pointer;border-radius:9px;color:var(--muted);font-weight:700;border:0;background:transparent;width:auto}
+    .tab.active{background:linear-gradient(180deg,#38bdf8,#2aa3e6);color:#04101d}
+
+    label{display:block;color:var(--muted);font-size:11px;font-weight:700;margin:8px 0 5px;letter-spacing:.02em}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    input,select,button{
+      width:100%;border:1px solid var(--line);border-radius:10px;background:#0c1626;color:var(--text);padding:9px 11px;
+    }
+    input,select{transition:border-color .15s, box-shadow .15s}
+    input:hover,select:hover{border-color:#3d5a7d}
+    input:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(56,189,248,.15)}
+    input[type=file]{padding:8px}
+    button{cursor:pointer;font-weight:750;transition:.15s}
+    button:hover:not(:disabled){transform:translateY(-1px);border-color:var(--blue)}
+    button.primary{background:linear-gradient(180deg,#38bdf8,#2563eb);color:#fff;border-color:transparent}
+    button.buy{background:#11362d;color:var(--green);border-color:#1d725c}
+    button.sell{background:#48242d;color:#ff8d98;border-color:#803846}
+    button.warn{color:var(--yellow)}
+    button:disabled{opacity:.42;cursor:not-allowed;transform:none}
+    .button-row{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+
+    .chip-row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px}
+    .chip{
+      width:auto;border:1px solid var(--line-soft);background:#13233a;color:var(--blue);border-radius:999px;
+      padding:5px 9px;font-size:11px;font-weight:700;cursor:pointer;
+    }
+    .chip:hover,.chip.active{background:#1d3b63;border-color:var(--blue);color:#d7f0ff}
+
+    .workspace{display:flex;flex-direction:column;gap:14px;min-width:0}
+    .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+    .stat{background:rgba(16,26,43,.86);border:1px solid var(--line-soft);border-radius:12px;padding:10px 12px}
+    .stat span{display:block;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+    .stat strong{display:block;margin-top:4px;font-size:17px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+    .green{color:var(--green)!important}.red{color:var(--red)!important}.yellow{color:var(--yellow)!important}
+
+    .replay-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:10px 14px}
+    .replay-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .replay-actions button{width:auto;padding:8px 14px;font-size:13px}
+    .replay-speed{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700}
+    .replay-speed label{margin:0;font-size:12px}
+    .replay-hint{margin:0;width:100%;color:var(--muted);font-size:12px;font-weight:600}
+    .replay-hint.ready{color:var(--green)}
+    .replay-speed select{width:auto;padding:7px 10px}
+
+    .chart-wrap{height:480px;position:relative;padding:0;overflow:hidden}
+    canvas{width:100%;height:100%;display:block}
+    .empty{
+      position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);text-align:center;
+      padding:28px;background:linear-gradient(180deg,rgba(7,11,20,.55),rgba(7,11,20,.88));
+    }
+    .empty-card{max-width:420px;pointer-events:auto}
+    .empty-card h3{margin:0 0 8px;color:var(--text);font-size:18px}
+    .empty-card p{margin:0 0 14px;color:var(--muted)}
+    .empty-steps{margin:0;padding:0;list-style:none;display:grid;gap:8px;text-align:left}
+    .empty-steps li{display:flex;gap:10px;align-items:flex-start;background:rgba(12,22,38,.75);border:1px solid var(--line-soft);border-radius:10px;padding:9px 11px;font-size:12px;color:var(--text)}
+    .empty-steps b{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#1d3b63;color:#d7f0ff;font-size:11px;flex:none}
+    .legend{position:absolute;top:10px;left:12px;background:rgba(7,17,31,.82);padding:7px 10px;border-radius:8px;color:var(--muted);font-size:12px;border:1px solid var(--line-soft)}
+
+    .bottom{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:14px}
+    .table-wrap{max-height:260px;overflow:auto}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+    th{position:sticky;top:0;background:#101a2b;color:var(--muted);font-weight:700}
+    .table-empty{color:var(--muted);font-style:normal}
+    .note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:8px}
+    .advanced-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+    .metric{background:var(--panel2);border:1px solid var(--line-soft);border-radius:12px;padding:11px}
+    .metric span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;font-weight:700;letter-spacing:.04em}
+    .metric strong{display:block;font-size:16px;margin-top:5px;font-variant-numeric:tabular-nums}
+    .equity-wrap{height:230px;position:relative}
+
+    .dropzone{display:block;padding:18px 12px;border:1px dashed #3d5a7d;border-radius:12px;background:#0c1626;color:var(--muted);text-align:center;cursor:pointer;margin:8px 0}
+    .dropzone strong{display:block;color:var(--text);margin-bottom:4px}
+
     .autocomplete-wrap{position:relative}
-    .autocomplete-list{position:absolute;top:100%;left:0;right:0;background:#091627;border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto;z-index:20;display:none;margin-top:4px}
-    .autocomplete-item{padding:8px 10px;cursor:pointer;border-bottom:1px solid #162a42;display:flex;justify-content:space-between;font-size:12px}
+    .autocomplete-list{position:absolute;top:100%;left:0;right:0;background:#0c1626;border:1px solid var(--line);border-radius:10px;max-height:180px;overflow-y:auto;z-index:20;display:none;margin-top:4px;box-shadow:var(--shadow)}
+    .autocomplete-item{padding:8px 10px;cursor:pointer;border-bottom:1px solid #162a42;display:flex;justify-content:space-between;gap:8px;font-size:12px}
     .autocomplete-item:hover{background:#132a48;color:var(--blue)}
     .autocomplete-item span.badge{background:#172b44;color:var(--yellow);padding:2px 6px;border-radius:4px;font-size:10px}
 
-    /* Modal */
-    .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;background:rgba(2,8,16,0.75);backdrop-filter:blur(6px);display:none;justify-content:center;align-items:center;z-index:9999;padding:16px}
-    .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:480px;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.7);max-height:90vh;overflow-y:auto}
-    .modal h2{margin:0 0 16px;font-size:17px;display:flex;justify-content:space-between;align-items:center}
+    .modal-overlay{position:fixed;inset:0;width:100vw;height:100vh;background:rgba(2,8,16,.78);backdrop-filter:blur(8px);display:none;justify-content:center;align-items:center;z-index:9999;padding:16px}
+    .modal{background:#101a2b;border:1px solid var(--line);border-radius:18px;width:100%;max-width:520px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.55);max-height:90vh;overflow-y:auto}
+    .modal h2{margin:0 0 6px;font-size:17px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .modal-lead{margin:0 0 14px;color:var(--muted);font-size:12px}
     .modal-close{cursor:pointer;color:var(--muted);font-size:24px;line-height:1;background:none;border:none;width:auto;padding:0}
     .modal-close:hover{color:var(--red)}
+    .or-split{display:flex;align-items:center;gap:10px;margin:16px 0 10px;color:var(--muted-2);font-size:11px;font-weight:700}
+    .or-split:before,.or-split:after{content:"";height:1px;flex:1;background:var(--line-soft)}
 
-    @media(max-width:1050px){main{grid-template-columns:1fr}.stats{grid-template-columns:repeat(3,1fr)}.advanced-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){.stats{grid-template-columns:repeat(2,1fr)}.bottom{grid-template-columns:1fr}.row{grid-template-columns:1fr}.chart-wrap{height:380px}.advanced-grid{grid-template-columns:1fr 1fr}}
+    @media(max-width:1100px){
+      main{grid-template-columns:minmax(0,1fr)}
+      .controls{position:static;max-height:none}
+      .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+      .advanced-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      header{flex-wrap:wrap}
+      .status{max-width:none}
+    }
+    @media(max-width:650px){
+      .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .bottom{grid-template-columns:minmax(0,1fr)}
+      .row,.flow-steps{grid-template-columns:1fr}
+      .chart-wrap{height:380px}
+      .replay-actions button{flex:1}
+      .header-actions{width:100%}
+      .status{max-width:none;flex:1}
+    }
   </style>
 </head>
 <body>
 <header>
-  <h1><span class="tag">GROT Scalper</span> Dynamic Ladder Simulator <span style="font-size:12px;color:#20d68f;margin-left:8px">Choice OpenAPI Pro</span></h1>
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">G</div>
+    <h1>
+      GROT Scalper
+      <span class="brand-sub">Dynamic ladder replay · Choice OpenAPI</span>
+    </h1>
+    <span class="tag">GROT Scalper</span>
+  </div>
   <div class="header-actions">
-    <div class="api-badge disconnected" id="choiceBadge" onclick="openAuthModal()" title="Click to open Choice Login & Credentials">⚡ Choice API: Disconnected</div>
-    <div class="status" id="appStatus">Ready · Select Choice API or CSV</div>
+    <div class="status" id="appStatus">Ready · Login, pick a symbol, then fetch candles</div>
+    <button type="button" class="api-badge disconnected" id="choiceBadge" onclick="openAuthModal()" title="Open Choice login">Choice: Login</button>
   </div>
 </header>
 <main>
   <aside class="panel controls">
     <div class="section">
       <div class="section-title">
-        <span>1 · Market Data Source</span>
-      </div>
-      
-      <!-- Connection Status Card with Direct Login Button -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:8px 10px;background:#061324;border:1px solid var(--line);border-radius:8px">
-        <div style="font-size:12px" id="sidebarAuthStatus"><span style="color:var(--red);font-weight:700">● Choice: Disconnected</span></div>
-        <button type="button" style="width:auto;padding:5px 12px;font-size:11px" class="primary" onclick="openAuthModal()">🔑 Login / Settings</button>
+        <span>1 · Load market data</span>
+        <span class="section-kicker">Login → symbol → fetch</span>
       </div>
 
-      <div class="tabs">
-        <div class="tab active" id="tabChoice" onclick="switchTab('choice')">⚡ Choice OpenAPI</div>
-        <div class="tab" id="tabCsv" onclick="switchTab('csv')">📁 CSV Upload</div>
+      <div class="flow-steps" aria-hidden="true">
+        <span id="flowLogin">1 Login</span>
+        <span id="flowSymbol">2 Symbol</span>
+        <span id="flowFetch">3 Fetch</span>
+      </div>
+
+      <div class="auth-card">
+        <div id="sidebarAuthStatus"><span style="color:var(--red);font-weight:700">Not logged in</span></div>
+        <button type="button" id="sidebarAuthBtn" style="width:auto;padding:6px 12px;font-size:12px" class="primary" onclick="openAuthModal()">Login</button>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" id="tabChoice" role="tab" aria-selected="true" onclick="switchTab('choice')">Choice API</button>
+        <button type="button" class="tab" id="tabCsv" role="tab" aria-selected="false" onclick="switchTab('csv')">CSV file</button>
       </div>
 
       <!-- Choice API Section -->
       <div id="choiceControls">
         <div class="autocomplete-wrap">
-          <label>Symbol / Scrip</label>
-          <input id="symbolInput" type="text" placeholder="Search NIFTY, RELIANCE, TCS..." value="NIFTY 50">
+          <label for="symbolInput">Symbol</label>
+          <input id="symbolInput" type="text" placeholder="Search NIFTY, RELIANCE, TCS..." value="NIFTY 50" autocomplete="off">
           <div class="autocomplete-list" id="symbolList"></div>
         </div>
-        
-        <!-- Popular Presets -->
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin:5px 0 8px">
-          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('NIFTY 50', 1, 26000, 50)">NIFTY (26000)</span>
-          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('BANKNIFTY', 1, 26009, 15)">BANKNIFTY (26009)</span>
-          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('FINNIFTY', 1, 26037, 25)">FINNIFTY (26037)</span>
-          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('SENSEX', 3, 1, 10)">SENSEX (1)</span>
-          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('RELIANCE', 1, 2885, 1)">RELIANCE (2885)</span>
+
+        <div class="chip-row" id="presetChips">
+          <button type="button" class="chip active" onclick="selectSymbol('NIFTY 50', 1, 26000, 50)">NIFTY</button>
+          <button type="button" class="chip" onclick="selectSymbol('BANKNIFTY', 1, 26009, 15)">BANKNIFTY</button>
+          <button type="button" class="chip" onclick="selectSymbol('FINNIFTY', 1, 26037, 25)">FINNIFTY</button>
+          <button type="button" class="chip" onclick="selectSymbol('SENSEX', 3, 1, 10)">SENSEX</button>
+          <button type="button" class="chip" onclick="selectSymbol('RELIANCE', 1, 2885, 1)">RELIANCE</button>
         </div>
 
         <div class="row">
           <div>
-            <label>Segment</label>
+            <label for="apiSegment">Exchange segment</label>
             <select id="apiSegment">
-              <option value="1" selected>NSE Cash / Index (1)</option>
-              <option value="2">NSE F&O (2)</option>
-              <option value="3">BSE Cash / Index (3)</option>
-              <option value="5">MCX (5)</option>
+              <option value="1" selected>NSE Cash / Index</option>
+              <option value="2">NSE F&amp;O</option>
+              <option value="3">BSE Cash / Index</option>
+              <option value="5">MCX</option>
             </select>
           </div>
           <div>
-            <label>Token</label>
-            <input id="apiToken" type="number" value="26000">
+            <label for="apiToken">Scrip token</label>
+            <input id="apiToken" type="number" value="26000" title="Choice instrument token">
           </div>
         </div>
+        <div class="note">Use a preset unless you already know the Choice token. NIFTY is 26000, BANKNIFTY is 26009.</div>
         <div class="row">
           <div>
-            <label>Timeframe</label>
+            <label for="apiResolution">Timeframe</label>
             <select id="apiResolution">
               <option value="1" selected>1 Minute</option>
               <option value="3">3 Minutes</option>
@@ -113,7 +259,7 @@
             </select>
           </div>
           <div>
-            <label>Auto-Range</label>
+            <label for="apiPresetRange">Date range</label>
             <select id="apiPresetRange">
               <option value="today">Today</option>
               <option value="3d">Last 3 Days</option>
@@ -124,48 +270,51 @@
           </div>
         </div>
         <div class="row">
-          <div><label>From Date</label><input id="apiFromDate" type="date"></div>
-          <div><label>To Date</label><input id="apiToDate" type="date"></div>
+          <div><label for="apiFromDate">From date</label><input id="apiFromDate" type="date"></div>
+          <div><label for="apiToDate">To date</label><input id="apiToDate" type="date"></div>
         </div>
-        <button class="primary" id="fetchApiBtn" style="margin-top:8px">⚡ Fetch Historical Data</button>
+        <button class="primary" id="fetchApiBtn" style="margin-top:8px">Fetch candles</button>
       </div>
 
       <!-- CSV Section (Fallback) -->
       <div id="csvControls" style="display:none">
-        <input id="csvFile" type="file" accept=".csv,text/csv">
-        <div class="note">Accepted columns: Date + Time or Datetime, Open, High, Low, Close, Volume.</div>
+        <label class="dropzone" for="csvFile">
+          <strong>Drop or choose a CSV</strong>
+          Date/time, Open, High, Low, Close, Volume
+        </label>
+        <input id="csvFile" class="sr-only" type="file" accept=".csv,text/csv">
       </div>
 
       <div class="section" style="margin-top:10px">
-        <label>Replay Selection Mode</label>
+        <label for="selectionMode">Replay window</label>
         <select id="selectionMode">
-          <option value="both">Date + Time</option>
-          <option value="date">Date Only</option>
-          <option value="time">Time Only (all dates)</option>
+          <option value="both">One date + session time</option>
+          <option value="date">Whole date onward</option>
+          <option value="time">Same time on all dates</option>
         </select>
-        <label>Trading Date</label>
-        <select id="tradeDate" disabled><option>Fetch data or upload CSV first</option></select>
+        <label for="tradeDate">Trading date</label>
+        <select id="tradeDate" disabled><option>Fetch candles first</option></select>
       </div>
     </div>
     <div class="section">
-      <div class="section-title">2 · GROT setup</div>
-      <div class="row"><div><label>Direction</label><select id="direction"><option value="buy">Buy</option><option value="short">Short</option></select></div><div><label>Start time</label><input id="startTime" type="time" value="09:30"></div></div>
-      <div class="row"><div><label>End/Square-off</label><input id="endTime" type="time" value="15:15"></div><div><label>Replay speed</label><select id="speed"><option value="1200">1×</option><option value="600">2×</option><option value="250" selected>5×</option><option value="100">10×</option></select></div></div>
-      <div class="row"><div><label>Start price</label><input id="startPrice" type="number" min="0" step="0.05" value="0"></div><div><label>Price source</label><select id="priceSource"><option value="market">Market at start</option><option value="custom">Use start price</option></select></div></div>
-      <div class="row"><div><label>Downside/Upside step</label><input id="gridStep" type="number" min="0.01" step="0.05" value="5"></div><div><label>Square-off points</label><input id="squarePoints" type="number" min="0.01" step="0.05" value="5"></div></div>
-      <div class="note">After every square-off, the next entry chases the exit price: Buy trigger = Exit − Step; Short trigger = Exit + Step.</div>
+      <div class="section-title">2 · GROT ladder <span class="section-kicker">Entries chase the last square-off</span></div>
+      <div class="row"><div><label for="direction">Direction</label><select id="direction"><option value="buy">Buy</option><option value="short">Short</option></select></div><div><label for="startTime">Start time</label><input id="startTime" type="time" value="09:30"></div></div>
+      <div class="row"><div><label for="endTime">Square-off time</label><input id="endTime" type="time" value="15:15"></div><div><label for="speed">Replay speed</label><select id="speed"><option value="1200">1×</option><option value="600">2×</option><option value="250" selected>5×</option><option value="100">10×</option></select></div></div>
+      <div class="row"><div><label for="startPrice">Start price</label><input id="startPrice" type="number" min="0" step="0.05" value="0"></div><div><label for="priceSource">Price source</label><select id="priceSource"><option value="market">Market at start</option><option value="custom">Use start price</option></select></div></div>
+      <div class="row"><div><label for="gridStep">Grid step</label><input id="gridStep" type="number" min="0.01" step="0.05" value="5"></div><div><label for="squarePoints">Square-off points</label><input id="squarePoints" type="number" min="0.01" step="0.05" value="5"></div></div>
+      <div class="note">After every square-off, the next entry chases the exit: Buy = Exit − Step; Short = Exit + Step.</div>
     </div>
     <div class="section">
-      <div class="section-title">3 · Quantity & risk</div>
-      <div class="row"><div><label>Per lot quantity</label><input id="perTradeQty" type="number" min="1" value="65"></div><div><label>Maximum open lots</label><input id="maxOpenLots" type="number" min="1" max="1000" value="10"></div></div>
+      <div class="section-title">3 · Quantity &amp; risk</div>
+      <div class="row"><div><label for="perTradeQty">Qty per lot</label><input id="perTradeQty" type="number" min="1" value="65"></div><div><label for="maxOpenLots">Max open lots</label><input id="maxOpenLots" type="number" min="1" max="1000" value="10"></div></div>
       <div class="note" id="qtyHint">Maximum open quantity: 65 × 10 = 650</div>
-      <div class="row"><div><label>Maximum profit ₹</label><input id="maxProfit" type="number" min="0" value="5000"></div><div><label>Maximum loss ₹</label><input id="maxLoss" type="number" min="0" value="3000"></div></div>
-      <label>Costs per completed trade ₹</label><input id="costs" type="number" min="0" value="0">
+      <div class="row"><div><label for="maxProfit">Max profit ₹</label><input id="maxProfit" type="number" min="0" value="5000"></div><div><label for="maxLoss">Max loss ₹</label><input id="maxLoss" type="number" min="0" value="3000"></div></div>
+      <label for="costs">Costs per completed trade ₹</label><input id="costs" type="number" min="0" value="0">
     </div>
-    <div class="section">
+    <div class="section" id="sidebarReplay" style="display:none">
       <div class="section-title">4 · Replay controls</div>
       <button class="primary" id="prepareBtn" disabled>Prepare Scalping</button>
-      <div class="button-row" style="margin-top:8px"><button class="buy" id="playBtn" disabled>▶ Play</button><button id="pauseBtn" disabled>Ⅱ Pause</button><button id="nextBtn" disabled>+1 Bar</button><button class="warn" id="resetBtn" disabled>↺ Reset</button></div>
+      <div class="button-row" style="margin-top:8px"><button class="buy" id="playBtn" disabled>Play</button><button id="pauseBtn" disabled>Pause</button><button id="nextBtn" disabled>+1 Bar</button><button class="warn" id="resetBtn" disabled>Reset</button></div>
     </div>
   </aside>
   <section class="workspace">
@@ -173,18 +322,17 @@
       <div class="stat"><span>Replay Date / Time</span><strong id="sTime">—</strong></div><div class="stat"><span>Net Position</span><strong id="sPosition">0</strong></div><div class="stat"><span>Average Price</span><strong id="sEntry">—</strong></div><div class="stat"><span>Current Price</span><strong id="sCurrent">—</strong></div><div class="stat"><span>Open P&L</span><strong id="sOpen">₹0.00</strong></div><div class="stat"><span>Total P&L</span><strong id="sTotal">₹0.00</strong></div>
     </div>
     
-    <!-- Top Floating Replay Controls -->
-    <div class="panel" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:10px 16px">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button class="primary" id="topPrepareBtn" style="width:auto;padding:8px 18px;font-size:13px" onclick="prepare()" disabled>⚙ Prepare</button>
-        <button class="buy" id="topPlayBtn" style="width:auto;padding:8px 22px;font-size:13px;background:#157347;color:#fff" onclick="play()" disabled>▶ Play Simulation</button>
-        <button id="topPauseBtn" style="width:auto;padding:8px 16px;font-size:13px" onclick="pauseReplay()" disabled>Ⅱ Pause</button>
-        <button id="topNextBtn" style="width:auto;padding:8px 16px;font-size:13px" onclick="stepReplay()" disabled>+1 Bar</button>
-        <button class="warn" id="topResetBtn" style="width:auto;padding:8px 16px;font-size:13px" onclick="prepare()" disabled>↺ Reset</button>
+    <div class="panel replay-bar">
+      <div class="replay-actions">
+        <button class="primary" id="topPrepareBtn" onclick="prepare()" disabled>Prepare</button>
+        <button class="buy" id="topPlayBtn" onclick="play()" disabled>Play</button>
+        <button id="topPauseBtn" onclick="pauseReplay()" disabled>Pause</button>
+        <button id="topNextBtn" onclick="stepReplay()" disabled>+1 Bar</button>
+        <button class="warn" id="topResetBtn" onclick="prepare()" disabled>Reset</button>
       </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:12px;color:var(--muted)">Speed:</span>
-        <select id="topSpeed" style="width:auto;padding:7px 12px;background:#091627;color:var(--text);border:1px solid var(--line);border-radius:8px" onchange="$('speed').value=this.value;if(timer){stop();play();}">
+      <div class="replay-speed">
+        <label for="topSpeed">Speed</label>
+        <select id="topSpeed">
           <option value="1200">1×</option>
           <option value="600">2×</option>
           <option value="250" selected>5×</option>
@@ -192,15 +340,30 @@
           <option value="20">50×</option>
         </select>
       </div>
+      <p class="replay-hint" id="replayHint">Fetch candles first. Prepare and Play unlock after data loads.</p>
     </div>
 
-    <div class="panel chart-wrap"><canvas id="chart"></canvas><div class="legend" id="legend">OHLC —</div><div class="empty" id="empty">Fetch Choice Historical Data or upload CSV to begin</div></div>
+    <div class="panel chart-wrap">
+      <canvas id="chart"></canvas>
+      <div class="legend" id="legend">OHLC —</div>
+      <div class="empty" id="empty">
+        <div class="empty-card">
+          <h3>No candles yet</h3>
+          <p>Load history, then prepare and play bar by bar.</p>
+          <ol class="empty-steps">
+            <li><b>1</b><span>Login to Choice in the header badge</span></li>
+            <li><b>2</b><span>Pick a symbol preset, or upload CSV</span></li>
+            <li><b>3</b><span>Fetch candles, then press Prepare and Play</span></li>
+          </ol>
+        </div>
+      </div>
+    </div>
     <div class="bottom">
-      <div class="panel"><div class="section-title">Open Orders</div><div class="table-wrap" style="max-height:170px;margin-bottom:16px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8">No open orders</td></tr></tbody></table></div><div class="section-title" style="border-top:1px solid var(--line);padding-top:13px">Completed Orders</div><div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7">No completed trades</td></tr></tbody></table></div></div>
-      <div class="panel"><div class="section-title">GROT vs One-Time Entry</div><div class="table-wrap"><table><tbody><tr><th>Completed scalps</th><td id="sumTrades">0</td></tr><tr><th>Active GROT entries</th><td id="sumActive">0</td></tr><tr><th>Last square-off reference</th><td id="lastSquareRef">—</td></tr><tr><th>Next pending entry levels</th><td id="nextTriggers">—</td></tr><tr><th>GROT quantity cap</th><td id="sumQtyCap">0</td></tr><tr><th>Peak GROT open quantity</th><td id="sumMaxQty">0</td></tr><tr><th>Cumulative GROT bought quantity</th><td id="sumCumulativeQty">0</td></tr><tr><th>Available GROT capacity</th><td id="sumAvailableQty">0</td></tr><tr><th>Winning trades</th><td id="sumWins">0</td></tr><tr><th>Win rate</th><td id="sumWinRate">0%</td></tr><tr><th>GROT gross P&L</th><td id="sumGross">₹0.00</td></tr><tr><th>Costs</th><td id="sumCosts">₹0.00</td></tr><tr><th>GROT total P&L</th><td id="sumNet">₹0.00</td></tr><tr><th>One-time entry</th><td id="oneEntry">—</td></tr><tr><th>One-time static quantity</th><td id="oneQty">0</td></tr><tr><th>One-time hold P&L</th><td id="onePnl">₹0.00</td></tr><tr><th>GROT advantage</th><td id="grotAdv">₹0.00</td></tr></tbody></table></div><div class="note">After every square-off, the pending ladder resets from the latest square-off price. It is not calculated from average price.</div></div>
+      <div class="panel"><div class="section-title">Open orders</div><div class="table-wrap" style="max-height:170px;margin-bottom:16px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div><div class="section-title" style="border-top:1px solid var(--line-soft);padding-top:13px">Completed orders</div><div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr></tbody></table></div></div>
+      <div class="panel"><div class="section-title">GROT vs one-time entry</div><div class="table-wrap"><table><tbody><tr><th>Completed scalps</th><td id="sumTrades">0</td></tr><tr><th>Active GROT entries</th><td id="sumActive">0</td></tr><tr><th>Last square-off reference</th><td id="lastSquareRef">—</td></tr><tr><th>Next pending entry levels</th><td id="nextTriggers">—</td></tr><tr><th>GROT quantity cap</th><td id="sumQtyCap">0</td></tr><tr><th>Peak GROT open quantity</th><td id="sumMaxQty">0</td></tr><tr><th>Cumulative GROT bought quantity</th><td id="sumCumulativeQty">0</td></tr><tr><th>Available GROT capacity</th><td id="sumAvailableQty">0</td></tr><tr><th>Winning trades</th><td id="sumWins">0</td></tr><tr><th>Win rate</th><td id="sumWinRate">0%</td></tr><tr><th>GROT gross P&L</th><td id="sumGross">₹0.00</td></tr><tr><th>Costs</th><td id="sumCosts">₹0.00</td></tr><tr><th>GROT total P&L</th><td id="sumNet">₹0.00</td></tr><tr><th>One-time entry</th><td id="oneEntry">—</td></tr><tr><th>One-time static quantity</th><td id="oneQty">0</td></tr><tr><th>One-time hold P&L</th><td id="onePnl">₹0.00</td></tr><tr><th>GROT advantage</th><td id="grotAdv">₹0.00</td></tr></tbody></table></div><div class="note">After every square-off, the pending ladder resets from the latest square-off price. It is not calculated from average price.</div></div>
     </div>
     <div class="panel">
-      <div class="section-title">Advanced Risk & Scalping Analytics</div>
+      <div class="section-title">Risk &amp; scalping analytics</div>
       <div class="advanced-grid">
         <div class="metric"><span>GROT Max Drawdown</span><strong id="mGrotDD">₹0.00</strong></div>
         <div class="metric"><span>One-Time Max Drawdown</span><strong id="mOneDD">₹0.00</strong></div>
@@ -223,63 +386,61 @@
 
 <!-- Choice 2FA Login Modal -->
 <div class="modal-overlay" id="authModal">
-  <div class="modal" style="max-width:480px">
-    <h2><span>⚡ Choice OpenAPI Authentication</span><button class="modal-close" onclick="closeAuthModal()">&times;</button></h2>
-    
+  <div class="modal">
+    <h2><span>Choice login</span><button class="modal-close" onclick="closeAuthModal()" aria-label="Close">&times;</button></h2>
+    <p class="modal-lead">Use your Choice vendor ID, API key, and registered mobile. OTP is fetched from Choice, then the session is stored in this browser.</p>
+
     <div id="authStep1">
       <div class="row">
         <div>
-          <label>API Gateway Endpoint</label>
+          <label for="modalBaseUrl">API gateway</label>
           <select id="modalBaseUrl">
-            <option value="https://finxomne.choiceindia.com" selected>Choice OMNE (finxomne)</option>
-            <option value="https://finx.choiceindia.com">Choice FINX (finx)</option>
+            <option value="https://finxomne.choiceindia.com" selected>OMNE (finxomne)</option>
+            <option value="https://finx.choiceindia.com">FINX (finx)</option>
           </select>
         </div>
         <div>
-          <label>Client ID / Vendor ID</label>
-          <input id="modalVendorId" type="text" placeholder="e.g. M09984">
+          <label for="modalVendorId">Client / Vendor ID</label>
+          <input id="modalVendorId" type="text" placeholder="e.g. M09984" autocomplete="username">
         </div>
       </div>
-      
-      <label>API Key / Bearer Token</label>
-      <input id="modalApiKey" type="password" placeholder="Choice Bearer API Key">
-      
-      <label>Registered Mobile Number</label>
-      <input id="modalMobile" type="tel" placeholder="e.g. 9876543210">
-      
+
+      <label for="modalApiKey">API key</label>
+      <input id="modalApiKey" type="password" placeholder="Choice bearer API key" autocomplete="off">
+
+      <label for="modalMobile">Registered mobile</label>
+      <input id="modalMobile" type="tel" placeholder="10-digit mobile" autocomplete="tel">
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-        <button class="primary" id="autoLoginBtn" onclick="autoLogin()">⚡ 1-Click Auto Login</button>
-        <button class="buy" id="getOtpBtn" onclick="getClientOtp()">📲 Get Client OTP</button>
+        <button class="primary" id="autoLoginBtn" onclick="autoLogin()">1-click login</button>
+        <button class="buy" id="getOtpBtn" onclick="getClientOtp()">Get OTP</button>
       </div>
-      <div class="note" style="color:var(--muted);margin-top:4px">
-        "Get Client OTP" calls <code>LoginTOTP</code> & <code>GetClientLoginTOTP</code> to fetch your OTP directly from Choice API.
-      </div>
+      <div class="note">Get OTP requests a one-time code from Choice. 1-click login does that and then validates it.</div>
 
-      <div id="otpBox" style="margin-top:14px;padding:12px;background:#061324;border:1px solid var(--line);border-radius:10px;display:none">
+      <div id="otpBox" style="margin-top:14px;padding:12px;background:#0b1422;border:1px solid var(--line-soft);border-radius:10px;display:none">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <label style="margin:0;color:var(--yellow);font-weight:700">Retrieved OTP / TOTP</label>
-          <span id="otpLiveBadge" style="background:#133c30;color:var(--green);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700">Auto Fetched</span>
+          <label for="modalTotp" style="margin:0;color:var(--yellow);font-weight:700">OTP</label>
+          <span id="otpLiveBadge" style="background:#133c30;color:var(--green);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700">Fetched</span>
         </div>
-        <input id="modalTotp" type="text" placeholder="6-digit OTP" style="font-size:16px;font-weight:bold;letter-spacing:4px;text-align:center">
-        <button class="buy" id="verifyOtpBtn" style="margin-top:8px" onclick="verify2FA()">✓ Validate OTP & Complete Login</button>
+        <input id="modalTotp" type="text" inputmode="numeric" placeholder="6-digit OTP" style="font-size:16px;font-weight:bold;letter-spacing:4px;text-align:center">
+        <button class="buy" id="verifyOtpBtn" style="margin-top:8px" onclick="verify2FA()">Validate OTP</button>
       </div>
 
-      <div style="text-align:center;margin:14px 0 6px;font-size:11px;color:var(--muted)">— OR Direct Session ID —</div>
-      <label>Session ID (if already logged in today)</label>
-      <input id="modalSessionId" type="text" placeholder="Paste active Session ID">
+      <div class="or-split">or paste a session</div>
+      <label for="modalSessionId">Session ID (already logged in today)</label>
+      <input id="modalSessionId" type="text" placeholder="Paste active session ID" autocomplete="off">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <button style="background:#102238" onclick="saveDirectAuth()">💾 Save Session</button>
-        <button class="warn" style="background:#28181e;border-color:#7a2e3e" onclick="logoutChoice()">⏻ Clear Session</button>
+        <button type="button" onclick="saveDirectAuth()">Save session</button>
+        <button type="button" class="warn" onclick="logoutChoice()">Clear session</button>
       </div>
 
-      <!-- Static IP Diagnostics -->
-      <div style="margin-top:14px;padding:10px;background:#061324;border:1px solid #1f3a58;border-radius:8px;font-size:11px">
-        <div style="display:flex;justify-content:space-between;color:var(--yellow);font-weight:700;margin-bottom:4px">
-          <span>📡 Static IP Diagnostics</span>
+      <div style="margin-top:14px;padding:10px;background:#0b1422;border:1px solid var(--line-soft);border-radius:8px;font-size:11px">
+        <div style="display:flex;justify-content:space-between;color:var(--yellow);font-weight:700;margin-bottom:4px;gap:8px">
+          <span>IP check</span>
           <span id="modalDetectedIp" style="color:var(--blue)">Detecting IP...</span>
         </div>
         <div style="color:var(--muted);line-height:1.4">
-          Choice OpenAPI requires API requests to match your registered Static IP. If you receive a <code>401 Static IP is blank or invalid</code> error, make sure your Choice Developer API Key is configured with your current IP above (or has no IP restriction).
+          Choice may require your developer key to allow this machine’s public IP. Localhost showing 127.0.0.1 is normal; ChartData still uses the registered IP.
         </div>
       </div>
     </div>
@@ -290,6 +451,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  window.$ = $;
   let allBars=[], sessionBars=[], dates=[], idx=0, timer=null, positions=[], pendingLevels=[], trades=[], prepared=false, strategyStopped=false, sessionStartRealised=0, anchorPrice=0, benchmarkAnchor=0, lastSquareOffPrice=NaN, maxQtyUsed=0, cumulativeEntryQty=0, equityHistory=[], grotPeak=0, onePeak=0, maxGrotDD=0, maxOneDD=0, worstGrot=0, worstOne=0, peakCapital=0;
   let activeTab = 'choice';
 
@@ -303,9 +465,77 @@
     activeTab = tab;
     $('tabChoice').className = 'tab' + (tab==='choice'?' active':'');
     $('tabCsv').className = 'tab' + (tab==='csv'?' active':'');
+    $('tabChoice').setAttribute('aria-selected', tab==='choice' ? 'true' : 'false');
+    $('tabCsv').setAttribute('aria-selected', tab==='csv' ? 'true' : 'false');
     $('choiceControls').style.display = tab==='choice' ? 'block' : 'none';
     $('csvControls').style.display = tab==='csv' ? 'block' : 'none';
   };
+
+  const EMPTY_HTML = `<div class="empty-card">
+    <h3>No candles yet</h3>
+    <p>Load history, then prepare and play bar by bar.</p>
+    <ol class="empty-steps">
+      <li><b>1</b><span>Login to Choice in the header badge</span></li>
+      <li><b>2</b><span>Pick a symbol preset, or upload CSV</span></li>
+      <li><b>3</b><span>Fetch candles, then press Prepare and Play</span></li>
+    </ol>
+  </div>`;
+
+  function showEmpty(message) {
+    const el = $('empty');
+    if(!el) return;
+    el.style.display = 'grid';
+    if(message) {
+      el.innerHTML = `<div class="empty-card"><h3>${message}</h3><p>Adjust the date, time window, or fetch again.</p></div>`;
+    } else {
+      el.innerHTML = EMPTY_HTML;
+    }
+  }
+
+  function setReplayHint(message, ready) {
+    const hint = $('replayHint');
+    if(!hint) return;
+    hint.textContent = message;
+    hint.className = 'replay-hint' + (ready ? ' ready' : '');
+  }
+
+  function updateFlow() {
+    const loginEl = $('flowLogin');
+    const symbolEl = $('flowSymbol');
+    const fetchEl = $('flowFetch');
+    if(!loginEl || !symbolEl || !fetchEl) return;
+    const connected = $('choiceBadge') && $('choiceBadge').classList.contains('connected');
+    loginEl.classList.toggle('done', !!connected);
+    symbolEl.classList.toggle('done', !!($('symbolInput') && $('symbolInput').value.trim()));
+    fetchEl.classList.toggle('done', allBars.length > 0);
+  }
+
+  function setAuthUi(connected, label) {
+    const badge = $('choiceBadge');
+    const side = $('sidebarAuthStatus');
+    const sideBtn = $('sidebarAuthBtn');
+    if(connected) {
+      badge.textContent = 'Choice: ' + label;
+      badge.className = 'api-badge connected';
+      if(side) side.innerHTML = `<span style="color:var(--green);font-weight:700">${label}</span> <span style="color:var(--muted);font-weight:600">· session saved</span>`;
+      if(sideBtn) {
+        sideBtn.textContent = 'Manage';
+        sideBtn.className = '';
+      }
+      if($('appStatus') && $('appStatus').textContent.includes('Login, pick a symbol')) {
+        $('appStatus').textContent = 'Connected · Pick a symbol and fetch candles';
+      }
+    } else {
+      badge.textContent = label || 'Choice: Login';
+      badge.className = 'api-badge disconnected';
+      if(side) side.innerHTML = `<span style="color:var(--red);font-weight:700">Not logged in</span>`;
+      if(sideBtn) {
+        sideBtn.textContent = 'Login';
+        sideBtn.className = 'primary';
+      }
+    }
+    updateFlow();
+  }
 
   // Public IP detection for diagnostics
   async function detectClientIp() {
@@ -341,6 +571,9 @@
   // Backdrop click to close modal
   $('authModal').addEventListener('click', e => {
     if(e.target === $('authModal')) window.closeAuthModal();
+  });
+  document.addEventListener('keydown', e => {
+    if(e.key === 'Escape') window.closeAuthModal();
   });
 
   // Initialize date pickers to default (last 7 days)
@@ -401,10 +634,9 @@
     $('modalTotp').value = '';
     $('otpBox').style.display = 'none';
     checkAuthStatus();
-    alert('Choice session cleared from browser.');
+    alert('Choice session cleared from this browser.');
   };
 
-  // Check auth status with backend & localStorage
   async function checkAuthStatus() {
     const local = getStoredAuth();
     if(local.vendor_id && !$('modalVendorId').value) $('modalVendorId').value = local.vendor_id;
@@ -430,30 +662,15 @@
       const isAuthed = (data.logged_in || data.has_session) || (local.vendor_id && (local.session_id || local.api_key));
 
       if(isAuthed && activeVendor) {
-        const clientLabel = `Connected (${activeVendor})`;
-        $('choiceBadge').textContent = '⚡ Choice API: ' + clientLabel;
-        $('choiceBadge').className = 'api-badge connected';
-        if($('sidebarAuthStatus')) {
-          $('sidebarAuthStatus').innerHTML = `<span style="color:var(--green);font-weight:700">● Choice: ${clientLabel}</span>`;
-        }
+        setAuthUi(true, activeVendor);
       } else {
-        $('choiceBadge').textContent = '⚡ Choice API: Disconnected (Click to Login)';
-        $('choiceBadge').className = 'api-badge disconnected';
-        if($('sidebarAuthStatus')) {
-          $('sidebarAuthStatus').innerHTML = `<span style="color:var(--red);font-weight:700">● Choice: Disconnected</span>`;
-        }
+        setAuthUi(false, 'Choice: Login');
       }
     } catch(e) {
       if(local.vendor_id && (local.session_id || local.api_key)) {
-        const clientLabel = `Connected (${local.vendor_id})`;
-        $('choiceBadge').textContent = '⚡ Choice API: ' + clientLabel;
-        $('choiceBadge').className = 'api-badge connected';
-        if($('sidebarAuthStatus')) {
-          $('sidebarAuthStatus').innerHTML = `<span style="color:var(--green);font-weight:700">● Choice: ${clientLabel}</span>`;
-        }
+        setAuthUi(true, local.vendor_id);
       } else {
-        $('choiceBadge').textContent = '⚡ Choice API: Click to Configure';
-        $('choiceBadge').className = 'api-badge disconnected';
+        setAuthUi(false, 'Choice: Login');
       }
     }
   }
@@ -473,7 +690,7 @@
 
     const btn = $('autoLoginBtn');
     btn.disabled = true;
-    btn.textContent = '⏳ Logging in...';
+    btn.textContent = 'Logging in...';
     $('appStatus').textContent = 'Authenticating with Choice API (GetClientLoginTOTP)...';
 
     try {
@@ -509,7 +726,7 @@
       alert('Login request failed: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = '⚡ 1-Click Auto Login';
+      btn.textContent = '1-click login';
     }
   };
 
@@ -527,7 +744,7 @@
     
     const btn = $('getOtpBtn');
     btn.disabled = true;
-    btn.textContent = '⏳ Fetching OTP...';
+    btn.textContent = 'Fetching OTP...';
 
     try {
       const res = await fetch('/api/auth/get_client_otp', {
@@ -555,7 +772,7 @@
       alert('Error fetching client OTP: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = '📲 Get Client OTP';
+      btn.textContent = 'Get OTP';
     }
   };
 
@@ -572,7 +789,7 @@
 
     const btn = $('verifyOtpBtn');
     btn.disabled = true;
-    btn.textContent = '⏳ Verifying...';
+    btn.textContent = 'Verifying...';
 
     try {
       const res = await fetch('/api/auth/validate', {
@@ -606,7 +823,7 @@
       alert('Verification error: ' + e.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = '✓ Validate OTP & Complete Login';
+      btn.textContent = 'Validate OTP';
     }
   };
 
@@ -687,7 +904,12 @@
       $('perTradeQty').value = lot;
       updateQtyHint();
     }
+    document.querySelectorAll('#presetChips .chip').forEach(chip => {
+      const label = chip.textContent.trim();
+      chip.classList.toggle('active', label === String(sym).split(' ')[0] || label === String(sym));
+    });
     symbolList.style.display = 'none';
+    updateFlow();
   };
 
   document.addEventListener('click', e => {
@@ -756,13 +978,13 @@
 
     if(!vendorId || (!sessionId && !apiKey)) {
       openAuthModal();
-      alert('Choice OpenAPI credentials required.\n\nPlease click "⚡ 1-Click Auto Login" or enter your Client ID, API Key, and Session ID in the Login modal.');
+      alert('Choice login required.\n\nOpen the Choice login badge, then use 1-click login or paste a session ID.');
       return;
     }
 
     const btn = $('fetchApiBtn');
     btn.disabled = true;
-    btn.textContent = '⏳ Fetching candles from Choice API...';
+    btn.textContent = 'Fetching candles...';
     $('appStatus').textContent = 'Contacting Choice OpenAPI...';
 
     const segmentId = +$('apiSegment').value;
@@ -864,6 +1086,8 @@
       setSelectionUI();
 
       $('appStatus').textContent = `Loaded ${allBars.length.toLocaleString()} candles · ${dates.length} dates · ${symbolInput.value}`;
+      updateFlow();
+      setReplayHint('Candles loaded. Preparing replay…', false);
       
       // Auto prepare and render simulation preview immediately
       prepare();
@@ -873,7 +1097,7 @@
     }
 
     btn.disabled = false;
-    btn.textContent = '⚡ Fetch Historical Data';
+    btn.textContent = 'Fetch candles';
   });
 
   // CSV Parsing
@@ -893,6 +1117,7 @@
       $('tradeDate').disabled=false;
       setSelectionUI();
       $('appStatus').textContent=`${allBars.length.toLocaleString()} candles · ${dates.length} dates · Latest selected`;
+      updateFlow();
       prepare();
     }catch(err){
       alert(err.message);
@@ -923,7 +1148,8 @@
   function prepare(){
     stop();
     if(!allBars.length){
-      $('empty').style.display='grid';
+      showEmpty();
+      setReplayHint('Fetch candles first. Prepare and Play unlock after data loads.', false);
       return;
     }
     const c=config(), day=$('tradeDate').value || (dates.length ? dates.at(-1) : '');
@@ -944,8 +1170,8 @@
     }
 
     if(!sessionBars.length){
-      $('empty').style.display='grid';
-      $('empty').textContent='No candles available for the selected date/time.';
+      showEmpty('No candles for this date/time');
+      setReplayHint('No candles in this date/time window. Adjust the replay window.', false);
       return;
     }
 
@@ -978,6 +1204,8 @@
 
     $('empty').style.display='none';
     $('appStatus').textContent=`Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
+    setReplayHint(`Ready · ${sessionBars.length} bars. Press Play or step +1 Bar.`, true);
+    updateFlow();
     update();
   }
   function highest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=-Infinity;for(let i=start;i<=end;i++)x=Math.max(x,a[i][k]);return end-start+1>=len?x:NaN;}
@@ -1069,8 +1297,13 @@
   $('pauseBtn').onclick=window.pauseReplay;
   $('nextBtn').onclick=window.stepReplay;
   $('resetBtn').onclick=prepare;
+  $('topSpeed').addEventListener('change', () => {
+    $('speed').value = $('topSpeed').value;
+    if(timer){ stop(); play(); }
+  });
+  $('speed').addEventListener('change', () => { $('topSpeed').value = $('speed').value; });
   function stamp(d){return timeKey(d)==='00:00'?dateKey(d):`${dateKey(d)} ${timeKey(d)}`;}
-  function update(){const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config(),open=b?openPnl(b.c):0,gross=trades.reduce((s,t)=>s+t.gross,0),cost=trades.reduce((s,t)=>s+(t.gross-t.net),0),net=gross-cost,wins=trades.filter(t=>t.net>0).length,grotTotal=net+open,onePnl=b?oneTimePnl(b.c,c):0,adv=grotTotal-onePnl,avgHold=trades.length?trades.reduce((s,t)=>s+(t.exitTime-t.entryTime)/60000,0)/trades.length:0,scalpsHour=trades.length/Math.max(1/60,equityHistory.length/60),ddChange=maxOneDD>0?(maxGrotDD/maxOneDD-1)*100:0,returnCapital=peakCapital?grotTotal/peakCapital*100:0,recovery=maxGrotDD?grotTotal/maxGrotDD:0;$('sTime').textContent=b?stamp(b.dt):'—';$('sPosition').textContent=positions.length?`${c.dir==='buy'?'BUY':'SHORT'} ${netQty()}`:'0';$('sPosition').className=positions.length?(c.dir==='buy'?'green':'red'):'';$('sEntry').textContent=positions.length?fmt(avgPrice()):'—';$('sCurrent').textContent=b?fmt(b.c):'—';$('sOpen').textContent=money(open);$('sOpen').className=open>=0?'green':'red';$('sTotal').textContent=money(grotTotal);$('sTotal').className=grotTotal>=0?'green':'red';$('sumTrades').textContent=trades.length;$('sumActive').textContent=positions.length;$('sumQtyCap').textContent=c.totalQty;$('sumMaxQty').textContent=maxQtyUsed;$('sumCumulativeQty').textContent=cumulativeEntryQty;$('sumAvailableQty').textContent=Math.max(0,c.totalQty-netQty());$('sumWins').textContent=wins;$('sumWinRate').textContent=trades.length?fmt(wins/trades.length*100)+'%':'0%';$('sumGross').textContent=money(gross);$('sumCosts').textContent=money(cost);$('sumNet').textContent=money(grotTotal);$('sumNet').className=grotTotal>=0?'green':'red';$('oneEntry').textContent=`${c.dir==='buy'?'BUY':'SHORT'} @ ${fmt(benchmarkAnchor)}`;$('oneQty').textContent=c.totalQty;$('onePnl').textContent=money(onePnl);$('onePnl').className=onePnl>=0?'green':'red';$('grotAdv').textContent=money(adv);$('grotAdv').className=adv>=0?'green':'red';$('mGrotDD').textContent=ddMoney(maxGrotDD);$('mOneDD').textContent=ddMoney(maxOneDD);$('mDDReduction').textContent=maxOneDD?`${ddChange>=0?'+':''}${fmt(ddChange)}% ${ddChange>0?'worse':'lower'}`:'0%';$('mDDReduction').className=ddChange<=0?'green':'red';$('mWorstGrot').textContent=money(worstGrot);$('mWorstGrot').className=worstGrot>=0?'green':'red';$('mWorstOne').textContent=money(worstOne);$('mWorstOne').className=worstOne>=0?'green':'red';$('mPeakCapital').textContent=money(peakCapital);$('mReturnCapital').textContent=fmt(returnCapital)+'%';$('mRecovery').textContent=fmt(recovery)+'×';$('mAvgHold').textContent=fmt(avgHold)+' min';$('mScalpsHour').textContent=fmt(scalpsHour);$('mLocked').textContent=money(net);$('mLocked').className=net>=0?'green':'red';$('mWinner').textContent=maxGrotDD<maxOneDD?'GROT':maxGrotDD>maxOneDD?'ONE-TIME':'TIE';$('mWinner').className=maxGrotDD<=maxOneDD?'green':'red';$('tradeLog').innerHTML=trades.length?trades.map((t,i)=>`<tr><td>${i+1}</td><td class="${t.side==='buy'?'green':'red'}">${t.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(t.entryTime)} @ ${fmt(t.entry)}</td><td>${stamp(t.exitTime)} @ ${fmt(t.exit)}</td><td>${t.qty}</td><td class="${t.net>=0?'green':'red'}">${money(t.net)}</td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7">No completed trades</td></tr>';draw();drawEquity();}
+  function update(){const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config(),open=b?openPnl(b.c):0,gross=trades.reduce((s,t)=>s+t.gross,0),cost=trades.reduce((s,t)=>s+(t.gross-t.net),0),net=gross-cost,wins=trades.filter(t=>t.net>0).length,grotTotal=net+open,onePnl=b?oneTimePnl(b.c,c):0,adv=grotTotal-onePnl,avgHold=trades.length?trades.reduce((s,t)=>s+(t.exitTime-t.entryTime)/60000,0)/trades.length:0,scalpsHour=trades.length/Math.max(1/60,equityHistory.length/60),ddChange=maxOneDD>0?(maxGrotDD/maxOneDD-1)*100:0,returnCapital=peakCapital?grotTotal/peakCapital*100:0,recovery=maxGrotDD?grotTotal/maxGrotDD:0;$('sTime').textContent=b?stamp(b.dt):'—';$('sPosition').textContent=positions.length?`${c.dir==='buy'?'BUY':'SHORT'} ${netQty()}`:'0';$('sPosition').className=positions.length?(c.dir==='buy'?'green':'red'):'';$('sEntry').textContent=positions.length?fmt(avgPrice()):'—';$('sCurrent').textContent=b?fmt(b.c):'—';$('sOpen').textContent=money(open);$('sOpen').className=open>=0?'green':'red';$('sTotal').textContent=money(grotTotal);$('sTotal').className=grotTotal>=0?'green':'red';$('sumTrades').textContent=trades.length;$('sumActive').textContent=positions.length;$('sumQtyCap').textContent=c.totalQty;$('sumMaxQty').textContent=maxQtyUsed;$('sumCumulativeQty').textContent=cumulativeEntryQty;$('sumAvailableQty').textContent=Math.max(0,c.totalQty-netQty());$('sumWins').textContent=wins;$('sumWinRate').textContent=trades.length?fmt(wins/trades.length*100)+'%':'0%';$('sumGross').textContent=money(gross);$('sumCosts').textContent=money(cost);$('sumNet').textContent=money(grotTotal);$('sumNet').className=grotTotal>=0?'green':'red';$('oneEntry').textContent=`${c.dir==='buy'?'BUY':'SHORT'} @ ${fmt(benchmarkAnchor)}`;$('oneQty').textContent=c.totalQty;$('onePnl').textContent=money(onePnl);$('onePnl').className=onePnl>=0?'green':'red';$('grotAdv').textContent=money(adv);$('grotAdv').className=adv>=0?'green':'red';$('mGrotDD').textContent=ddMoney(maxGrotDD);$('mOneDD').textContent=ddMoney(maxOneDD);$('mDDReduction').textContent=maxOneDD?`${ddChange>=0?'+':''}${fmt(ddChange)}% ${ddChange>0?'worse':'lower'}`:'0%';$('mDDReduction').className=ddChange<=0?'green':'red';$('mWorstGrot').textContent=money(worstGrot);$('mWorstGrot').className=worstGrot>=0?'green':'red';$('mWorstOne').textContent=money(worstOne);$('mWorstOne').className=worstOne>=0?'green':'red';$('mPeakCapital').textContent=money(peakCapital);$('mReturnCapital').textContent=fmt(returnCapital)+'%';$('mRecovery').textContent=fmt(recovery)+'×';$('mAvgHold').textContent=fmt(avgHold)+' min';$('mScalpsHour').textContent=fmt(scalpsHour);$('mLocked').textContent=money(net);$('mLocked').className=net>=0?'green':'red';$('mWinner').textContent=maxGrotDD<maxOneDD?'GROT':maxGrotDD>maxOneDD?'ONE-TIME':'TIE';$('mWinner').className=maxGrotDD<=maxOneDD?'green':'red';$('tradeLog').innerHTML=trades.length?trades.map((t,i)=>`<tr><td>${i+1}</td><td class="${t.side==='buy'?'green':'red'}">${t.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(t.entryTime)} @ ${fmt(t.entry)}</td><td>${stamp(t.exitTime)} @ ${fmt(t.exit)}</td><td>${t.qty}</td><td class="${t.net>=0?'green':'red'}">${money(t.net)}</td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr>';draw();drawEquity();}
   function draw(){
     const canvas=$('chart');
     if(!canvas) return;
@@ -1102,7 +1335,7 @@
     $('legend').textContent=a.length?`OHLC  ${fmt(a.at(-1).o)}  ${fmt(a.at(-1).h)}  ${fmt(a.at(-1).l)}  ${fmt(a.at(-1).c)} · Bar ${currentIdx+1}/${sessionBars.length} · Active ${positions.length} · Pending ${pendingLevels.length}`:'OHLC —';
   }
   function drawEquity(){const canvas=$('equityChart'),rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;const x=canvas.getContext('2d');x.scale(dpr,dpr);const W=rect.width,H=rect.height;x.fillStyle='#0b1829';x.fillRect(0,0,W,H);if(!equityHistory.length){x.fillStyle='#90a4bc';x.fillText('Start replay to build GROT vs One-Time equity curve',18,28);return;}const a=equityHistory.slice(-800),vals=a.flatMap(p=>[p.grot,p.one,0]),hi=Math.max(...vals),lo=Math.min(...vals),pad=(hi-lo||1)*.12,left=62,right=14,top=24,bottom=30,Y=v=>top+(hi+pad-v)/(hi-lo+2*pad)*(H-top-bottom),X=i=>left+i*(W-left-right)/Math.max(1,a.length-1);x.strokeStyle='#263b55';for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const v=hi+pad-i*(hi-lo+2*pad)/4;x.fillStyle='#90a4bc';x.fillText('₹'+Math.round(v).toLocaleString('en-IN'),4,y+4);}const line=(key,color)=>{x.strokeStyle=color;x.lineWidth=2;x.beginPath();a.forEach((p,i)=>{const px=X(i),py=Y(p[key]);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();};line('grot','#20d68f');line('one','#43a5ff');x.fillStyle='#20d68f';x.fillRect(left,7,16,3);x.fillText('GROT',left+22,12);x.fillStyle='#43a5ff';x.fillRect(left+82,7,16,3);x.fillText('One-Time',left+104,12);const labels=Math.min(5,a.length);x.fillStyle='#90a4bc';x.textAlign='center';for(let n=0;n<labels;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labels-1));x.fillText(timeKey(a[j].dt),X(j),H-9);}x.textAlign='left';}
-  function refreshOpenOrders(){const el=$('openOrderLog');if(!el)return;const b=sessionBars.length?sessionBars[Math.min(idx,sessionBars.length-1)]:null,c=config();if(!positions.length||!b){el.innerHTML='<tr><td colspan="8">No open orders</td></tr>';return;}el.innerHTML=positions.slice().sort((a,z)=>c.dir==='buy'?z.entry-a.entry:a.entry-z.entry).map((p,i)=>{const target=p.side==='buy'?p.entry+c.square:p.entry-c.square,live=(b.c-p.entry)*(p.side==='buy'?1:-1)*p.qty;return `<tr><td>${i+1}</td><td class="${p.side==='buy'?'green':'red'}">${p.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(p.entryTime)} @ ${fmt(p.entry)}</td><td class="yellow">${p.side==='buy'?'SELL':'COVER'} @ ${fmt(target)}</td><td>${fmt(b.c)}</td><td>${p.qty}</td><td class="${live>=0?'green':'red'}">${money(live)}</td><td class="yellow">OPEN</td></tr>`;}).join('');}
+  function refreshOpenOrders(){const el=$('openOrderLog');if(!el)return;const b=sessionBars.length?sessionBars[Math.min(idx,sessionBars.length-1)]:null,c=config();if(!positions.length||!b){el.innerHTML='<tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr>';return;}el.innerHTML=positions.slice().sort((a,z)=>c.dir==='buy'?z.entry-a.entry:a.entry-z.entry).map((p,i)=>{const target=p.side==='buy'?p.entry+c.square:p.entry-c.square,live=(b.c-p.entry)*(p.side==='buy'?1:-1)*p.qty;return `<tr><td>${i+1}</td><td class="${p.side==='buy'?'green':'red'}">${p.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(p.entryTime)} @ ${fmt(p.entry)}</td><td class="yellow">${p.side==='buy'?'SELL':'COVER'} @ ${fmt(target)}</td><td>${fmt(b.c)}</td><td>${p.qty}</td><td class="${live>=0?'green':'red'}">${money(live)}</td><td class="yellow">OPEN</td></tr>`;}).join('');}
   function refreshNextTriggers(){const el=$('nextTriggers'),ref=$('lastSquareRef');if(!el||!ref)return;const c=config();ref.textContent=Number.isFinite(lastSquareOffPrice)?fmt(lastSquareOffPrice):'No square-off yet';el.textContent=pendingLevels.length?pendingLevels.slice().sort((a,z)=>c.dir==='buy'?z-a:a-z).slice(0,6).map(v=>fmt(v)).join(' · '):'—';}
   setInterval(()=>{refreshNextTriggers();refreshOpenOrders();},250);
   addEventListener('resize',()=>{draw();drawEquity();});
