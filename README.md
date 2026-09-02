@@ -69,7 +69,15 @@ Because Vercel serverless functions run across distributed instances, authentica
 ---
 
 ### Understanding Choice 401 "Static IP is blank or invalid / ClientId doesn't exists":
-This is Choice OpenAPI's gateway error message when an API request is received without a valid `VendorId` header or with an unauthenticated session. By logging in via **🔑 Login / Settings**, your `VendorId`, `Bearer`, and `SessionId` headers are automatically attached to all historical chart requests.
+Choice India OpenAPI enforces regulatory Static IP checks on protected market data endpoints (`/api/OpenGraph/ChartData`):
+1. **Direct Browser Mode (Automatic)**:
+   The simulator first attempts a direct fetch from your web browser so that requests originate from your computer's exact ISP IP (which matches your declared static IP).
+2. **Dual-Gateway Failover**:
+   If `https://finxomne.choiceindia.com` rejects with a 401 ClientId mismatch, the backend automatically retries on `https://finx.choiceindia.com` (and vice-versa).
+3. **Forwarded IP Headers**:
+   The backend proxy forwards your public client IP in standard proxy headers (`X-Forwarded-For`, `X-Real-IP`, `Client-IP`).
+4. **IP Configuration in Choice Portal**:
+   If Choice still rejects requests, log into the Choice FinX Developer Portal (`finx.choiceindia.com`), edit your API Key, and verify that the **Static IP** field is set to your current public IP (or `0.0.0.0` if allowed).
 
 ---
 

@@ -95,6 +95,11 @@ def test_api_endpoints():
     # Check root route
     resp = client.get('/')
     assert resp.status_code == 200, "Root route should return 200"
+
+    # Check client IP route
+    resp = client.get('/api/client_ip')
+    assert resp.status_code == 200, "Client IP route should return 200"
+    assert 'ip' in resp.get_json(), "Must contain ip"
     
     # Check status route with direct payload
     resp = client.post('/api/auth/status', json={"vendor_id": "TEST_USER", "session_id": "TEST_SESS"})

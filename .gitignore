@@ -7,3 +7,5 @@ __pycache__/
 .vercel/
 node_modules/
 .DS_Store
+*_guide_text.txt
+test_gateways.py

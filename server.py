@@ -146,17 +146,31 @@ def extract_credentials(req_data=None, req_obj=None):
         "logged_in": bool(session_id and vendor_id)
     }
 
-def get_headers(creds=None):
+def get_headers(creds=None, req_obj=None):
     c = creds or auth_state
     headers = {
         "Content-Type": "application/json"
     }
     if c.get("vendor_id"):
-        headers["VendorId"] = c["vendor_id"]
+        headers["VendorId"] = str(c["vendor_id"]).strip()
     if c.get("api_key"):
-        headers["Bearer"] = c["api_key"]
+        headers["Bearer"] = str(c["api_key"]).strip()
     if c.get("session_id"):
-        headers["Authorization"] = f"SessionId {c['session_id']}"
+        sess = str(c["session_id"]).strip()
+        headers["Authorization"] = f"SessionId {sess}"
+
+    # Forward client IP headers so Choice gateway can verify the user's declared Static IP
+    if req_obj:
+        client_ip = (
+            req_obj.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or req_obj.headers.get("X-Real-IP", "").strip()
+            or req_obj.headers.get("CF-Connecting-IP", "").strip()
+            or getattr(req_obj, "remote_addr", "")
+        )
+        if client_ip:
+            headers["X-Forwarded-For"] = client_ip
+            headers["X-Real-IP"] = client_ip
+            headers["Client-IP"] = client_ip
     return headers
 
 def init_choice_client():
@@ -240,6 +254,13 @@ def serve_static(path):
 def auth_status():
     data = request.get_json(silent=True) or {}
     creds = extract_credentials(data, request)
+    client_ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.headers.get("X-Real-IP", "").strip()
+        or request.headers.get("CF-Connecting-IP", "").strip()
+        or request.remote_addr
+        or ""
+    )
     return jsonify({
         "status": "success",
         "logged_in": creds["logged_in"],
@@ -247,8 +268,20 @@ def auth_status():
         "mobile_no": creds["mobile_no"],
         "has_session": bool(creds["session_id"]),
         "base_url": creds["base_url"],
+        "client_ip": client_ip,
         "last_otp": auth_state.get("last_otp", "")
     })
+
+@app.route("/api/client_ip", methods=["GET"])
+def get_client_ip():
+    client_ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.headers.get("X-Real-IP", "").strip()
+        or request.headers.get("CF-Connecting-IP", "").strip()
+        or request.remote_addr
+        or ""
+    )
+    return jsonify({"status": "success", "ip": client_ip})
 
 @app.route("/api/auth/get_client_otp", methods=["POST"])
 def auth_get_client_otp():
@@ -676,7 +709,10 @@ def get_historical_candles():
     from_sec = parse_date_to_1980_seconds(from_date)
     to_sec = parse_date_to_1980_seconds(to_date)
 
-    url = f"{creds['base_url']}/api/OpenGraph/ChartData"
+    primary_url = f"{creds['base_url']}/api/OpenGraph/ChartData"
+    alt_base = "https://finx.choiceindia.com" if "finxomne" in creds['base_url'] else "https://finxomne.choiceindia.com"
+    alt_url = f"{alt_base}/api/OpenGraph/ChartData"
+
     payload = {
         "SegmentId": segment_id,
         "Token": int(token),
@@ -685,65 +721,71 @@ def get_historical_candles():
         "Interval": interval
     }
 
-    try:
-        resp = requests.post(url, json=payload, headers=get_headers(creds), timeout=30)
-        if resp.status_code == 200:
-            res_json = resp.json()
-            if res_json.get("Status") == "Success":
-                chart_resp = res_json.get("Response", {})
-                history = chart_resp.get("lstChartHistory", [])
-                divisor = float(chart_resp.get("PriceDivisor", 1) or 1)
-                epoch_1980 = datetime.datetime(1980, 1, 1)
+    req_headers = get_headers(creds, req_obj=request)
+    urls_to_try = [primary_url, alt_url]
+    last_resp_text = ""
+    last_status = 500
 
-                bars = []
-                for row in history:
-                    parts = str(row).split(",")
-                    if len(parts) >= 6:
-                        sec_offset = int(parts[0])
-                        dt_obj = epoch_1980 + datetime.timedelta(seconds=sec_offset)
-                        bars.append({
-                            "dt": dt_obj.strftime("%Y-%m-%d %H:%M:%S"),
-                            "o": float(parts[1]) / divisor,
-                            "h": float(parts[2]) / divisor,
-                            "l": float(parts[3]) / divisor,
-                            "c": float(parts[4]) / divisor,
-                            "v": float(parts[5])
+    for current_url in urls_to_try:
+        try:
+            resp = requests.post(current_url, json=payload, headers=req_headers, timeout=30)
+            last_status = resp.status_code
+            last_resp_text = resp.text
+
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if res_json.get("Status") == "Success":
+                    chart_resp = res_json.get("Response", {})
+                    history = chart_resp.get("lstChartHistory", [])
+                    divisor = float(chart_resp.get("PriceDivisor", 1) or 1)
+                    epoch_1980 = datetime.datetime(1980, 1, 1)
+
+                    bars = []
+                    for row in history:
+                        parts = str(row).split(",")
+                        if len(parts) >= 6:
+                            sec_offset = int(parts[0])
+                            dt_obj = epoch_1980 + datetime.timedelta(seconds=sec_offset)
+                            bars.append({
+                                "dt": dt_obj.strftime("%Y-%m-%d %H:%M:%S"),
+                                "o": float(parts[1]) / divisor,
+                                "h": float(parts[2]) / divisor,
+                                "l": float(parts[3]) / divisor,
+                                "c": float(parts[4]) / divisor,
+                                "v": float(parts[5])
+                            })
+
+                    if bars:
+                        return jsonify({
+                            "status": "success",
+                            "count": len(bars),
+                            "bars": bars,
+                            "gateway": current_url
                         })
+        except Exception as e:
+            last_resp_text = str(e)
+            continue
 
-                if bars:
-                    return jsonify({
-                        "status": "success",
-                        "count": len(bars),
-                        "bars": bars
-                    })
-                else:
-                    return jsonify({
-                        "status": "error",
-                        "message": "Choice API returned no chart candles for the selected range/token.",
-                        "raw": res_json
-                    }), 404
-            else:
-                return jsonify({
-                    "status": "error",
-                    "message": f"Choice API Error: {res_json.get('Message') or res_json}",
-                    "raw": res_json
-                }), 400
-        elif resp.status_code == 401:
-            return jsonify({
-                "status": "error",
-                "message": f"Choice API 401 Unauthorized: {resp.text}. Please re-verify your Client ID, API Key, and Session ID in 🔑 Login / Settings."
-            }), 401
-        else:
-            return jsonify({
-                "status": "error",
-                "message": f"Choice API returned HTTP {resp.status_code}: {resp.text}"
-            }), resp.status_code
+    client_ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.headers.get("X-Real-IP", "").strip()
+        or request.remote_addr
+        or ""
+    )
 
-    except Exception as e:
+    if last_status == 401:
         return jsonify({
             "status": "error",
-            "message": f"Historical API request failed: {str(e)}"
-        }), 500
+            "message": f"Choice API 401 Unauthorized: {last_resp_text}. (Client IP: {client_ip}). Please check that your Choice Portal API Key has your static IP registered or allows your IP.",
+            "client_ip": client_ip,
+            "tried_gateways": urls_to_try
+        }), 401
+
+    return jsonify({
+        "status": "error",
+        "message": f"Choice API Error (HTTP {last_status}): {last_resp_text}",
+        "client_ip": client_ip
+    }), last_status
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

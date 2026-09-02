@@ -261,6 +261,17 @@
         <button style="background:#102238" onclick="saveDirectAuth()">💾 Save Session</button>
         <button class="warn" style="background:#28181e;border-color:#7a2e3e" onclick="logoutChoice()">⏻ Clear Session</button>
       </div>
+
+      <!-- Static IP Diagnostics -->
+      <div style="margin-top:14px;padding:10px;background:#061324;border:1px solid #1f3a58;border-radius:8px;font-size:11px">
+        <div style="display:flex;justify-content:space-between;color:var(--yellow);font-weight:700;margin-bottom:4px">
+          <span>📡 Static IP Diagnostics</span>
+          <span id="modalDetectedIp" style="color:var(--blue)">Detecting IP...</span>
+        </div>
+        <div style="color:var(--muted);line-height:1.4">
+          Choice OpenAPI requires API requests to match your registered Static IP. If you receive a <code>401 Static IP is blank or invalid</code> error, make sure your Choice Developer API Key is configured with your current IP above (or has no IP restriction).
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -286,10 +297,30 @@
     $('csvControls').style.display = tab==='csv' ? 'block' : 'none';
   };
 
+  // Public IP detection for diagnostics
+  async function detectClientIp() {
+    try {
+      const el = $('modalDetectedIp');
+      if(!el) return;
+      const res = await fetch('/api/client_ip');
+      const data = await res.json();
+      if(data.ip) {
+        el.textContent = 'Detected IP: ' + data.ip;
+      }
+    } catch(e) {
+      try {
+        const res2 = await fetch('https://api.ipify.org?format=json');
+        const data2 = await res2.json();
+        if(data2.ip) $('modalDetectedIp').textContent = 'Detected IP: ' + data2.ip;
+      } catch(e2) {}
+    }
+  }
+
   // Auth modal management
   window.openAuthModal = () => {
     const modal = $('authModal');
     if(modal) modal.style.display = 'flex';
+    detectClientIp();
   };
   window.closeAuthModal = () => {
     const modal = $('authModal');
@@ -655,13 +686,59 @@
     }
   });
 
-  // Fetch historical data from Choice API
+  function parse1980Seconds(dateVal) {
+    const epoch1980 = new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
+    let dt;
+    if(dateVal instanceof Date) {
+      dt = dateVal;
+    } else {
+      const str = String(dateVal).trim();
+      if(str.includes(' ')) {
+        const [dPart, tPart] = str.split(' ');
+        const [y, m, d] = dPart.split('-').map(Number);
+        const [h, min, s] = tPart.split(':').map(Number);
+        dt = new Date(Date.UTC(y, m - 1, d, h || 0, min || 0, s || 0));
+      } else {
+        const [y, m, d] = str.split('-').map(Number);
+        dt = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+      }
+    }
+    return Math.floor((dt.getTime() - epoch1980.getTime()) / 1000);
+  }
+
+  function parseChoiceChartResponse(resJson) {
+    if(!resJson || (resJson.Status !== 'Success' && !resJson.Response)) return null;
+    const chartResp = resJson.Response || {};
+    const history = chartResp.lstChartHistory || [];
+    const divisor = +(chartResp.PriceDivisor || 1) || 1;
+    const epoch1980 = new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
+
+    const bars = [];
+    for(const row of history) {
+      const parts = String(row).split(',');
+      if(parts.length >= 6) {
+        const secOffset = +parts[0];
+        const dt = new Date(epoch1980.getTime() + secOffset * 1000);
+        bars.push({
+          dt: dt,
+          o: +parts[1] / divisor,
+          h: +parts[2] / divisor,
+          l: +parts[3] / divisor,
+          c: +parts[4] / divisor,
+          v: +parts[5] || 0
+        });
+      }
+    }
+    return bars;
+  }
+
+  // Fetch historical data from Choice API (Hybrid: Direct Browser + Serverless Proxy Fallback)
   $('fetchApiBtn').addEventListener('click', async () => {
     const local = getStoredAuth();
     const vendorId = local.vendor_id || $('modalVendorId').value.trim();
     const sessionId = local.session_id || $('modalSessionId').value.trim();
     const apiKey = local.api_key || $('modalApiKey').value.trim();
-    const baseUrl = local.base_url || $('modalBaseUrl').value;
+    const baseUrl = local.base_url || $('modalBaseUrl').value || 'https://finxomne.choiceindia.com';
 
     if(!vendorId || (!sessionId && !apiKey)) {
       openAuthModal();
@@ -674,46 +751,96 @@
     btn.textContent = '⏳ Fetching candles from Choice API...';
     $('appStatus').textContent = 'Contacting Choice OpenAPI...';
 
-    const payload = {
-      segment_id: +$('apiSegment').value,
-      token: +$('apiToken').value,
-      from_date: $('apiFromDate').value,
-      to_date: $('apiToDate').value,
-      interval: $('apiResolution').value,
-      vendor_id: vendorId,
-      session_id: sessionId,
-      api_key: apiKey,
-      base_url: baseUrl
-    };
+    const segmentId = +$('apiSegment').value;
+    const token = +$('apiToken').value;
+    const fromDate = $('apiFromDate').value;
+    const toDate = $('apiToDate').value;
+    const interval = $('apiResolution').value;
 
+    let loadedBars = null;
+    let lastErrorMsg = '';
+
+    // Attempt 1: Direct Browser-to-Choice fetch (matches user's local ISP static IP directly)
     try {
-      const res = await fetch('/api/historical', {
+      const fromSec = parse1980Seconds(fromDate);
+      const toSec = parse1980Seconds(toDate);
+      const directHeaders = {
+        'Content-Type': 'application/json',
+        'VendorId': vendorId,
+        'Bearer': apiKey
+      };
+      if(sessionId) directHeaders['Authorization'] = `SessionId ${sessionId}`;
+
+      const directRes = await fetch(`${baseUrl}/api/OpenGraph/ChartData`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Vendor-Id': vendorId,
-          'X-Api-Key': apiKey,
-          'X-Session-Id': sessionId,
-          'X-Base-Url': baseUrl
-        },
-        body: JSON.stringify(payload)
+        headers: directHeaders,
+        body: JSON.stringify({
+          SegmentId: segmentId,
+          Token: token,
+          FromDate: fromSec,
+          ToDate: toSec,
+          Interval: interval
+        })
       });
-      const data = await res.json();
 
-      if(data.status !== 'success' || !data.bars || !data.bars.length) {
-        throw new Error(data.message || 'No candle data returned for selection.');
+      if(directRes.ok) {
+        const directJson = await directRes.json();
+        const parsed = parseChoiceChartResponse(directJson);
+        if(parsed && parsed.length) {
+          loadedBars = parsed;
+        }
       }
+    } catch(directErr) {
+      // Direct CORS or network error, proceed to server proxy fallback
+    }
 
-      // Convert bars to simulator format
-      allBars = data.bars.map(b => ({
-        dt: parseDate(b.dt) || new Date(b.dt),
-        o: +b.o,
-        h: +b.h,
-        l: +b.l,
-        c: +b.c,
-        v: +b.v || 0
-      })).filter(b => b.dt && !isNaN(b.dt.getTime()));
+    // Attempt 2: Serverless proxy fallback with client IP forwarding and dual gateway fallback
+    if(!loadedBars || !loadedBars.length) {
+      const payload = {
+        segment_id: segmentId,
+        token: token,
+        from_date: fromDate,
+        to_date: toDate,
+        interval: interval,
+        vendor_id: vendorId,
+        session_id: sessionId,
+        api_key: apiKey,
+        base_url: baseUrl
+      };
 
+      try {
+        const res = await fetch('/api/historical', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Vendor-Id': vendorId,
+            'X-Api-Key': apiKey,
+            'X-Session-Id': sessionId,
+            'X-Base-Url': baseUrl
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if(data.status === 'success' && data.bars && data.bars.length) {
+          loadedBars = data.bars.map(b => ({
+            dt: parseDate(b.dt) || new Date(b.dt),
+            o: +b.o,
+            h: +b.h,
+            l: +b.l,
+            c: +b.c,
+            v: +b.v || 0
+          })).filter(b => b.dt && !isNaN(b.dt.getTime()));
+        } else {
+          lastErrorMsg = data.message || 'No candle data returned for selection.';
+        }
+      } catch(proxyErr) {
+        lastErrorMsg = proxyErr.message;
+      }
+    }
+
+    if(loadedBars && loadedBars.length) {
+      allBars = loadedBars;
       allBars.sort((a,b) => a.dt - b.dt);
       dates = [...new Set(allBars.map(b => dateKey(b.dt)))];
 
@@ -726,14 +853,13 @@
       
       // Auto prepare and render simulation preview immediately
       prepare();
-
-    } catch(err) {
-      alert('Historical Data Fetch Error:\n' + err.message);
-      $('appStatus').textContent = 'API Error: ' + err.message;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '⚡ Fetch Historical Data';
+    } else {
+      alert('Historical Data Fetch Error:\n' + (lastErrorMsg || 'Failed to retrieve candles from Choice OpenAPI.'));
+      $('appStatus').textContent = 'API Error: ' + lastErrorMsg;
     }
+
+    btn.disabled = false;
+    btn.textContent = '⚡ Fetch Historical Data';
   });
 
   // CSV Parsing
