@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KKunal GROT Dynamic Ladder Simulator v7 · Choice API</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0e1b2d;--panel2:#12233a;--line:#263b55;--text:#eef5ff;--muted:#90a4bc;--green:#20d68f;--red:#ff5d6c;--yellow:#ffd166;--blue:#43a5ff}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#06101d,#0a1830);color:var(--text);font:14px Inter,Segoe UI,Arial,sans-serif;min-height:100vh}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--line);background:#081424dd;position:sticky;top:0;z-index:10}
+    h1{font-size:18px;margin:0;display:flex;align-items:center;gap:8px}.tag{color:var(--blue);font-weight:700}.status{padding:6px 12px;border-radius:20px;background:#17283d;color:var(--muted);font-size:13px}
+    .header-actions{display:flex;align-items:center;gap:10px}
+    .api-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:#102238;transition:.15s;user-select:none}
+    .api-badge:hover{transform:translateY(-1px);box-shadow:0 0 12px rgba(67,165,255,0.35);border-color:var(--blue)}
+    .api-badge.connected{background:#0e382b;color:var(--green);border-color:#1c7056}
+    .api-badge.disconnected{background:#3b1c24;color:var(--red);border-color:#7a2e3e}
+    main{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;max-width:1600px;margin:auto}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 12px 35px #0004}
+    .controls{display:flex;flex-direction:column;gap:12px}.section{border-top:1px solid var(--line);padding-top:12px}.section:first-child{border:0;padding-top:0}.section-title{font-size:12px;color:var(--blue);font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center}
+    .tabs{display:flex;gap:4px;background:#091627;padding:3px;border-radius:8px;margin-bottom:8px}
+    .tab{flex:1;text-align:center;padding:6px;font-size:12px;cursor:pointer;border-radius:6px;color:var(--muted);font-weight:600}
+    .tab.active{background:var(--blue);color:#04101d}
+    label{display:block;color:var(--muted);font-size:12px;margin:6px 0 4px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}input,select,button{width:100%;border:1px solid var(--line);border-radius:8px;background:#091627;color:var(--text);padding:9px;font:inherit}input[type=file]{padding:7px}button{cursor:pointer;font-weight:750;transition:.15s}button:hover{transform:translateY(-1px);border-color:var(--blue)}button.primary{background:var(--blue);color:#04101d;border-color:var(--blue)}button.buy{background:#123f35;color:var(--green);border-color:#1d725c}button.sell{background:#48242d;color:#ff8d98;border-color:#803846}button.warn{color:var(--yellow)}button:disabled{opacity:.4;cursor:not-allowed;transform:none}.button-row{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+    .workspace{display:flex;flex-direction:column;gap:16px;min-width:0}.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}.stat span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase}.stat strong{display:block;margin-top:5px;font-size:18px}.green{color:var(--green)!important}.red{color:var(--red)!important}.yellow{color:var(--yellow)!important}
+    .chart-wrap{height:480px;position:relative;padding:0;overflow:hidden}canvas{width:100%;height:100%;display:block}.empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);text-align:center;padding:40px;pointer-events:none;background:#07111fee}.legend{position:absolute;top:10px;left:12px;background:#07111fbb;padding:7px 10px;border-radius:8px;color:var(--muted)}
+    .bottom{display:grid;grid-template-columns:1fr 1fr;gap:16px}.table-wrap{max-height:260px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);white-space:nowrap}th{position:sticky;top:0;background:var(--panel);color:var(--muted)}.note{font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px}.advanced-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.metric{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px}.metric span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase}.metric strong{display:block;font-size:16px;margin-top:5px}.equity-wrap{height:230px;position:relative}
+    
+    /* Autocomplete list */
+    .autocomplete-wrap{position:relative}
+    .autocomplete-list{position:absolute;top:100%;left:0;right:0;background:#091627;border:1px solid var(--line);border-radius:8px;max-height:180px;overflow-y:auto;z-index:20;display:none;margin-top:4px}
+    .autocomplete-item{padding:8px 10px;cursor:pointer;border-bottom:1px solid #162a42;display:flex;justify-content:space-between;font-size:12px}
+    .autocomplete-item:hover{background:#132a48;color:var(--blue)}
+    .autocomplete-item span.badge{background:#172b44;color:var(--yellow);padding:2px 6px;border-radius:4px;font-size:10px}
+
+    /* Modal */
+    .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;background:rgba(2,8,16,0.75);backdrop-filter:blur(6px);display:none;justify-content:center;align-items:center;z-index:9999;padding:16px}
+    .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:100%;max-width:480px;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.7);max-height:90vh;overflow-y:auto}
+    .modal h2{margin:0 0 16px;font-size:17px;display:flex;justify-content:space-between;align-items:center}
+    .modal-close{cursor:pointer;color:var(--muted);font-size:24px;line-height:1;background:none;border:none;width:auto;padding:0}
+    .modal-close:hover{color:var(--red)}
+
+    @media(max-width:1050px){main{grid-template-columns:1fr}.stats{grid-template-columns:repeat(3,1fr)}.advanced-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){.stats{grid-template-columns:repeat(2,1fr)}.bottom{grid-template-columns:1fr}.row{grid-template-columns:1fr}.chart-wrap{height:380px}.advanced-grid{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<header>
+  <h1><span class="tag">KKunal GROT</span> Dynamic Ladder Simulator <span style="font-size:12px;color:#20d68f;margin-left:8px">v7 · CHOICE API</span></h1>
+  <div class="header-actions">
+    <div class="api-badge disconnected" id="choiceBadge" onclick="openAuthModal()" title="Click to open Choice Login & Credentials">⚡ Choice API: Disconnected</div>
+    <div class="status" id="appStatus">Ready · Select Choice API or CSV</div>
+  </div>
+</header>
+<main>
+  <aside class="panel controls">
+    <div class="section">
+      <div class="section-title">
+        <span>1 · Market Data Source</span>
+      </div>
+      
+      <!-- Connection Status Card with Direct Login Button -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:8px 10px;background:#061324;border:1px solid var(--line);border-radius:8px">
+        <div style="font-size:12px" id="sidebarAuthStatus"><span style="color:var(--red);font-weight:700">● Choice: Disconnected</span></div>
+        <button type="button" style="width:auto;padding:5px 12px;font-size:11px" class="primary" onclick="openAuthModal()">🔑 Login / Settings</button>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" id="tabChoice" onclick="switchTab('choice')">⚡ Choice OpenAPI</div>
+        <div class="tab" id="tabCsv" onclick="switchTab('csv')">📁 CSV Upload</div>
+      </div>
+
+      <!-- Choice API Section -->
+      <div id="choiceControls">
+        <div class="autocomplete-wrap">
+          <label>Symbol / Scrip</label>
+          <input id="symbolInput" type="text" placeholder="Search NIFTY, RELIANCE, TCS..." value="NIFTY 50">
+          <div class="autocomplete-list" id="symbolList"></div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Segment</label>
+            <select id="apiSegment">
+              <option value="1" selected>NSE Cash (1)</option>
+              <option value="2">NSE F&O (2)</option>
+              <option value="3">BSE Cash (3)</option>
+              <option value="5">MCX (5)</option>
+            </select>
+          </div>
+          <div>
+            <label>Token</label>
+            <input id="apiToken" type="number" value="26000">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Timeframe</label>
+            <select id="apiResolution">
+              <option value="1" selected>1 Minute</option>
+              <option value="3">3 Minutes</option>
+              <option value="5">5 Minutes</option>
+              <option value="15">15 Minutes</option>
+              <option value="30">30 Minutes</option>
+              <option value="60">1 Hour</option>
+              <option value="D">Daily (EOD)</option>
+            </select>
+          </div>
+          <div>
+            <label>Auto-Range</label>
+            <select id="apiPresetRange">
+              <option value="today">Today</option>
+              <option value="3d">Last 3 Days</option>
+              <option value="7d" selected>Last 7 Days</option>
+              <option value="15d">Last 15 Days</option>
+              <option value="30d">Last 30 Days</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div><label>From Date</label><input id="apiFromDate" type="date"></div>
+          <div><label>To Date</label><input id="apiToDate" type="date"></div>
+        </div>
+        <button class="primary" id="fetchApiBtn" style="margin-top:8px">⚡ Fetch Historical Data</button>
+      </div>
+
+      <!-- CSV Section (Fallback) -->
+      <div id="csvControls" style="display:none">
+        <input id="csvFile" type="file" accept=".csv,text/csv">
+        <div class="note">Accepted columns: Date + Time or Datetime, Open, High, Low, Close, Volume.</div>
+      </div>
+
+      <div class="section" style="margin-top:10px">
+        <label>Replay Selection Mode</label>
+        <select id="selectionMode">
+          <option value="both">Date + Time</option>
+          <option value="date">Date Only</option>
+          <option value="time">Time Only (all dates)</option>
+        </select>
+        <label>Trading Date</label>
+        <select id="tradeDate" disabled><option>Fetch data or upload CSV first</option></select>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">2 · GROT setup</div>
+      <div class="row"><div><label>Direction</label><select id="direction"><option value="buy">Buy</option><option value="short">Short</option></select></div><div><label>Start time</label><input id="startTime" type="time" value="09:30"></div></div>
+      <div class="row"><div><label>End/Square-off</label><input id="endTime" type="time" value="15:15"></div><div><label>Replay speed</label><select id="speed"><option value="1200">1×</option><option value="600">2×</option><option value="250" selected>5×</option><option value="100">10×</option></select></div></div>
+      <div class="row"><div><label>Start price</label><input id="startPrice" type="number" min="0" step="0.05" value="0"></div><div><label>Price source</label><select id="priceSource"><option value="market">Market at start</option><option value="custom">Use start price</option></select></div></div>
+      <div class="row"><div><label>Downside/Upside step</label><input id="gridStep" type="number" min="0.01" step="0.05" value="5"></div><div><label>Square-off points</label><input id="squarePoints" type="number" min="0.01" step="0.05" value="5"></div></div>
+      <div class="note">After every square-off, the next entry chases the exit price: Buy trigger = Exit − Step; Short trigger = Exit + Step.</div>
+    </div>
+    <div class="section">
+      <div class="section-title">3 · Quantity & risk</div>
+      <div class="row"><div><label>Per lot quantity</label><input id="perTradeQty" type="number" min="1" value="65"></div><div><label>Maximum open lots</label><input id="maxOpenLots" type="number" min="1" max="1000" value="10"></div></div>
+      <div class="note" id="qtyHint">Maximum open quantity: 65 × 10 = 650</div>
+      <div class="row"><div><label>Maximum profit ₹</label><input id="maxProfit" type="number" min="0" value="5000"></div><div><label>Maximum loss ₹</label><input id="maxLoss" type="number" min="0" value="3000"></div></div>
+      <label>Costs per completed trade ₹</label><input id="costs" type="number" min="0" value="0">
+    </div>
+    <div class="section">
+      <div class="section-title">4 · Replay controls</div>
+      <button class="primary" id="prepareBtn" disabled>Prepare Scalping</button>
+      <div class="button-row" style="margin-top:8px"><button class="buy" id="playBtn" disabled>▶ Play</button><button id="pauseBtn" disabled>Ⅱ Pause</button><button id="nextBtn" disabled>+1 Bar</button><button class="warn" id="resetBtn" disabled>↺ Reset</button></div>
+    </div>
+  </aside>
+  <section class="workspace">
+    <div class="stats">
+      <div class="stat"><span>Replay Date / Time</span><strong id="sTime">—</strong></div><div class="stat"><span>Net Position</span><strong id="sPosition">0</strong></div><div class="stat"><span>Average Price</span><strong id="sEntry">—</strong></div><div class="stat"><span>Current Price</span><strong id="sCurrent">—</strong></div><div class="stat"><span>Open P&L</span><strong id="sOpen">₹0.00</strong></div><div class="stat"><span>Total P&L</span><strong id="sTotal">₹0.00</strong></div>
+    </div>
+    
+    <!-- Top Floating Replay Controls -->
+    <div class="panel" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:10px 16px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button class="primary" id="topPrepareBtn" style="width:auto;padding:8px 18px;font-size:13px" onclick="prepare()" disabled>⚙ Prepare</button>
+        <button class="buy" id="topPlayBtn" style="width:auto;padding:8px 22px;font-size:13px;background:#157347;color:#fff" onclick="play()" disabled>▶ Play Simulation</button>
+        <button id="topPauseBtn" style="width:auto;padding:8px 16px;font-size:13px" onclick="pauseReplay()" disabled>Ⅱ Pause</button>
+        <button id="topNextBtn" style="width:auto;padding:8px 16px;font-size:13px" onclick="stepReplay()" disabled>+1 Bar</button>
+        <button class="warn" id="topResetBtn" style="width:auto;padding:8px 16px;font-size:13px" onclick="prepare()" disabled>↺ Reset</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:12px;color:var(--muted)">Speed:</span>
+        <select id="topSpeed" style="width:auto;padding:7px 12px;background:#091627;color:var(--text);border:1px solid var(--line);border-radius:8px" onchange="$('speed').value=this.value;if(timer){stop();play();}">
+          <option value="1200">1×</option>
+          <option value="600">2×</option>
+          <option value="250" selected>5×</option>
+          <option value="100">10×</option>
+          <option value="20">50×</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel chart-wrap"><canvas id="chart"></canvas><div class="legend" id="legend">OHLC —</div><div class="empty" id="empty">Fetch Choice Historical Data or upload CSV to begin</div></div>
+    <div class="bottom">
+      <div class="panel"><div class="section-title">Open Orders</div><div class="table-wrap" style="max-height:170px;margin-bottom:16px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8">No open orders</td></tr></tbody></table></div><div class="section-title" style="border-top:1px solid var(--line);padding-top:13px">Completed Orders</div><div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7">No completed trades</td></tr></tbody></table></div></div>
+      <div class="panel"><div class="section-title">GROT vs One-Time Entry</div><div class="table-wrap"><table><tbody><tr><th>Completed scalps</th><td id="sumTrades">0</td></tr><tr><th>Active GROT entries</th><td id="sumActive">0</td></tr><tr><th>Last square-off reference</th><td id="lastSquareRef">—</td></tr><tr><th>Next pending entry levels</th><td id="nextTriggers">—</td></tr><tr><th>GROT quantity cap</th><td id="sumQtyCap">0</td></tr><tr><th>Peak GROT open quantity</th><td id="sumMaxQty">0</td></tr><tr><th>Cumulative GROT bought quantity</th><td id="sumCumulativeQty">0</td></tr><tr><th>Available GROT capacity</th><td id="sumAvailableQty">0</td></tr><tr><th>Winning trades</th><td id="sumWins">0</td></tr><tr><th>Win rate</th><td id="sumWinRate">0%</td></tr><tr><th>GROT gross P&L</th><td id="sumGross">₹0.00</td></tr><tr><th>Costs</th><td id="sumCosts">₹0.00</td></tr><tr><th>GROT total P&L</th><td id="sumNet">₹0.00</td></tr><tr><th>One-time entry</th><td id="oneEntry">—</td></tr><tr><th>One-time static quantity</th><td id="oneQty">0</td></tr><tr><th>One-time hold P&L</th><td id="onePnl">₹0.00</td></tr><tr><th>GROT advantage</th><td id="grotAdv">₹0.00</td></tr></tbody></table></div><div class="note">After every square-off, the pending ladder resets from the latest square-off price. It is not calculated from average price.</div></div>
+    </div>
+    <div class="panel">
+      <div class="section-title">Advanced Risk & Scalping Analytics</div>
+      <div class="advanced-grid">
+        <div class="metric"><span>GROT Max Drawdown</span><strong id="mGrotDD">₹0.00</strong></div>
+        <div class="metric"><span>One-Time Max Drawdown</span><strong id="mOneDD">₹0.00</strong></div>
+        <div class="metric"><span>GROT DD vs One-Time</span><strong id="mDDReduction">0%</strong></div>
+        <div class="metric"><span>Worst GROT MTM</span><strong id="mWorstGrot">₹0.00</strong></div>
+        <div class="metric"><span>Worst One-Time MTM</span><strong id="mWorstOne">₹0.00</strong></div>
+        <div class="metric"><span>Peak Capital Deployed</span><strong id="mPeakCapital">₹0.00</strong></div>
+        <div class="metric"><span>Return on Peak Capital</span><strong id="mReturnCapital">0%</strong></div>
+        <div class="metric"><span>Recovery Factor</span><strong id="mRecovery">0.00×</strong></div>
+        <div class="metric"><span>Average Holding Time</span><strong id="mAvgHold">0 min</strong></div>
+        <div class="metric"><span>Scalps per Hour</span><strong id="mScalpsHour">0.00</strong></div>
+        <div class="metric"><span>Realised Profit Locked</span><strong id="mLocked">₹0.00</strong></div>
+        <div class="metric"><span>Risk Winner</span><strong id="mWinner">—</strong></div>
+      </div>
+      <div class="equity-wrap"><canvas id="equityChart"></canvas></div>
+      <div class="note">Green line: GROT total equity (realised + open P&L). Blue line: complete quantity entered once and held. Drawdown is measured peak-to-trough on each replay equity curve.</div>
+    </div>
+  </section>
+</main>
+
+<!-- Choice 2FA Login Modal -->
+<div class="modal-overlay" id="authModal">
+  <div class="modal" style="max-width:480px">
+    <h2><span>⚡ Choice OpenAPI Authentication</span><button class="modal-close" onclick="closeAuthModal()">&times;</button></h2>
+    
+    <div id="authStep1">
+      <div class="row">
+        <div>
+          <label>API Gateway Endpoint</label>
+          <select id="modalBaseUrl">
+            <option value="https://finxomne.choiceindia.com" selected>Choice OMNE (finxomne)</option>
+            <option value="https://finx.choiceindia.com">Choice FINX (finx)</option>
+          </select>
+        </div>
+        <div>
+          <label>Client ID / Vendor ID</label>
+          <input id="modalVendorId" type="text" placeholder="e.g. M09984">
+        </div>
+      </div>
+      
+      <label>API Key / Bearer Token</label>
+      <input id="modalApiKey" type="password" placeholder="Choice Bearer API Key">
+      
+      <label>Registered Mobile Number</label>
+      <input id="modalMobile" type="tel" placeholder="e.g. 9876543210">
+      
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+        <button class="primary" id="autoLoginBtn" onclick="autoLogin()">⚡ 1-Click Auto Login</button>
+        <button class="buy" id="getOtpBtn" onclick="getClientOtp()">📲 Get Client OTP</button>
+      </div>
+      <div class="note" style="color:var(--muted);margin-top:4px">
+        "Get Client OTP" calls <code>LoginTOTP</code> & <code>GetClientLoginTOTP</code> to fetch your OTP directly from Choice API.
+      </div>
+
+      <div id="otpBox" style="margin-top:14px;padding:12px;background:#061324;border:1px solid var(--line);border-radius:10px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="margin:0;color:var(--yellow);font-weight:700">Retrieved OTP / TOTP</label>
+          <span id="otpLiveBadge" style="background:#133c30;color:var(--green);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700">Auto Fetched</span>
+        </div>
+        <input id="modalTotp" type="text" placeholder="6-digit OTP" style="font-size:16px;font-weight:bold;letter-spacing:4px;text-align:center">
+        <button class="buy" id="verifyOtpBtn" style="margin-top:8px" onclick="verify2FA()">✓ Validate OTP & Complete Login</button>
+      </div>
+
+      <div style="text-align:center;margin:14px 0 6px;font-size:11px;color:var(--muted)">— OR Direct Session ID —</div>
+      <label>Session ID (if already logged in today)</label>
+      <input id="modalSessionId" type="text" placeholder="Paste active Session ID">
+      <button style="margin-top:8px;background:#102238" onclick="saveDirectAuth()">💾 Save Direct Session</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  let allBars=[], sessionBars=[], dates=[], idx=0, timer=null, positions=[], pendingLevels=[], trades=[], prepared=false, strategyStopped=false, sessionStartRealised=0, anchorPrice=0, benchmarkAnchor=0, lastSquareOffPrice=NaN, maxQtyUsed=0, cumulativeEntryQty=0, equityHistory=[], grotPeak=0, onePeak=0, maxGrotDD=0, maxOneDD=0, worstGrot=0, worstOne=0, peakCapital=0;
+  let activeTab = 'choice';
+
+  const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  const money = n => '₹'+fmt(n);
+  const ddMoney = n => n>0 ? '-₹'+fmt(n) : '₹0.00';
+  const norm = s => String(s||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+
+  // Tab switching
+  window.switchTab = (tab) => {
+    activeTab = tab;
+    $('tabChoice').className = 'tab' + (tab==='choice'?' active':'');
+    $('tabCsv').className = 'tab' + (tab==='csv'?' active':'');
+    $('choiceControls').style.display = tab==='choice' ? 'block' : 'none';
+    $('csvControls').style.display = tab==='csv' ? 'block' : 'none';
+  };
+
+  // Auth modal management
+  window.openAuthModal = () => {
+    const modal = $('authModal');
+    if(modal) modal.style.display = 'flex';
+  };
+  window.closeAuthModal = () => {
+    const modal = $('authModal');
+    if(modal) modal.style.display = 'none';
+  };
+  $('choiceBadge').onclick = window.openAuthModal;
+
+  // Backdrop click to close modal
+  $('authModal').addEventListener('click', e => {
+    if(e.target === $('authModal')) window.closeAuthModal();
+  });
+
+  // Initialize date pickers to default (last 7 days)
+  function initDatePickers() {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 7);
+    $('apiToDate').value = dateKey(end);
+    $('apiFromDate').value = dateKey(start);
+  }
+  initDatePickers();
+
+  $('apiPresetRange').addEventListener('change', e => {
+    const val = e.target.value;
+    const end = new Date();
+    const start = new Date();
+    if(val === 'today') start.setDate(end.getDate());
+    else if(val === '3d') start.setDate(end.getDate() - 3);
+    else if(val === '7d') start.setDate(end.getDate() - 7);
+    else if(val === '15d') start.setDate(end.getDate() - 15);
+    else if(val === '30d') start.setDate(end.getDate() - 30);
+    $('apiToDate').value = dateKey(end);
+    $('apiFromDate').value = dateKey(start);
+  });
+
+  // Check auth status with backend
+  async function checkAuthStatus() {
+    try {
+      const res = await fetch('/api/auth/status');
+      const data = await res.json();
+      if(data.logged_in || data.has_session) {
+        const clientLabel = data.vendor_id ? `Connected (${data.vendor_id})` : 'Connected';
+        $('choiceBadge').textContent = '⚡ Choice API: ' + clientLabel;
+        $('choiceBadge').className = 'api-badge connected';
+        if($('sidebarAuthStatus')) {
+          $('sidebarAuthStatus').innerHTML = `<span style="color:var(--green);font-weight:700">● Choice: ${clientLabel}</span>`;
+        }
+        if(data.vendor_id) $('modalVendorId').value = data.vendor_id;
+        if(data.mobile_no) $('modalMobile').value = data.mobile_no;
+        if(data.base_url) $('modalBaseUrl').value = data.base_url;
+      } else {
+        $('choiceBadge').textContent = '⚡ Choice API: Disconnected (Click to Login)';
+        $('choiceBadge').className = 'api-badge disconnected';
+        if($('sidebarAuthStatus')) {
+          $('sidebarAuthStatus').innerHTML = `<span style="color:var(--red);font-weight:700">● Choice: Disconnected</span>`;
+        }
+      }
+    } catch(e) {
+      $('choiceBadge').textContent = '⚡ Choice API: Click to Configure';
+      $('choiceBadge').className = 'api-badge disconnected';
+      if($('sidebarAuthStatus')) {
+        $('sidebarAuthStatus').innerHTML = `<span style="color:var(--yellow);font-weight:700">● Choice: Click Login</span>`;
+      }
+    }
+  }
+  checkAuthStatus();
+
+  // 1-Click Auto Login
+  window.autoLogin = async () => {
+    const mobile = $('modalMobile').value.trim();
+    const vendorId = $('modalVendorId').value.trim();
+    const apiKey = $('modalApiKey').value.trim();
+    const baseUrl = $('modalBaseUrl').value;
+    
+    if(!mobile || !vendorId || !apiKey) {
+      alert('Please fill in Client ID, API Key, and Mobile Number.');
+      return;
+    }
+
+    const btn = $('autoLoginBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Logging in...';
+    $('appStatus').textContent = 'Authenticating with Choice API (GetClientLoginTOTP)...';
+
+    try {
+      const res = await fetch('/api/auth/login_auto', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl })
+      });
+      const data = await res.json();
+      if(data.status === 'success') {
+        alert(data.message || 'Choice 1-Click Login successful!');
+        closeAuthModal();
+        checkAuthStatus();
+        $('appStatus').textContent = 'Choice API Connected · Ready to fetch';
+      } else {
+        alert('Auto Login Failed: ' + data.message);
+        $('appStatus').textContent = 'Login error: ' + data.message;
+      }
+    } catch(e) {
+      alert('Login request failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⚡ 1-Click Auto Login';
+    }
+  };
+
+  // Get Client OTP using GetClientLoginTOTP
+  window.getClientOtp = async () => {
+    const mobile = $('modalMobile').value.trim();
+    const vendorId = $('modalVendorId').value.trim();
+    const apiKey = $('modalApiKey').value.trim();
+    const baseUrl = $('modalBaseUrl').value;
+
+    if(!mobile) { alert('Please enter your mobile number.'); return; }
+    
+    const btn = $('getOtpBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Fetching OTP...';
+
+    try {
+      const res = await fetch('/api/auth/get_client_otp', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl })
+      });
+      const data = await res.json();
+      if(data.status === 'success' && data.otp) {
+        $('modalTotp').value = data.otp;
+        $('otpBox').style.display = 'block';
+        $('otpLiveBadge').textContent = 'OTP: ' + data.otp;
+        $('appStatus').textContent = `OTP received (${data.otp}) via GetClientLoginTOTP`;
+      } else {
+        alert('Could not retrieve OTP: ' + (data.message || 'Unknown error'));
+        $('otpBox').style.display = 'block';
+      }
+    } catch(e) {
+      alert('Error fetching client OTP: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📲 Get Client OTP';
+    }
+  };
+
+  // Validate TOTP
+  window.verify2FA = async () => {
+    const otp = $('modalTotp').value.trim();
+    const mobile = $('modalMobile').value.trim();
+    const vendorId = $('modalVendorId').value.trim();
+    const apiKey = $('modalApiKey').value.trim();
+    const baseUrl = $('modalBaseUrl').value;
+
+    if(!otp) { alert('Please enter or fetch the OTP first.'); return; }
+
+    const btn = $('verifyOtpBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Verifying...';
+
+    try {
+      const res = await fetch('/api/auth/validate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ otp, mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl })
+      });
+      const data = await res.json();
+      if(data.status === 'success') {
+        alert('Authentication verified & session established!');
+        closeAuthModal();
+        checkAuthStatus();
+        $('appStatus').textContent = 'Choice API Connected · Ready to fetch';
+      } else {
+        alert('Validation failed: ' + (data.message || 'Invalid OTP'));
+      }
+    } catch(e) {
+      alert('Verification error: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '✓ Validate OTP & Complete Login';
+    }
+  };
+
+  // Save direct session ID
+  window.saveDirectAuth = async () => {
+    const vendor_id = $('modalVendorId').value.trim() || 'CHOICE_USER';
+    const api_key = $('modalApiKey').value.trim();
+    const session_id = $('modalSessionId').value.trim();
+    if(!session_id) { alert('Please enter your Session ID.'); return; }
+    try {
+      const res = await fetch('/api/auth/manual', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ vendor_id, api_key, session_id })
+      });
+      const data = await res.json();
+      alert('Session saved!');
+      closeAuthModal();
+      checkAuthStatus();
+    } catch(e) {
+      alert('Save error: ' + e.message);
+    }
+  };
+
+  // Symbol Autocomplete search
+  const symbolInput = $('symbolInput');
+  const symbolList = $('symbolList');
+  let searchTimeout = null;
+
+  symbolInput.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      const q = symbolInput.value.trim();
+      try {
+        const res = await fetch(`/api/scrip/search?query=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if(data.results && data.results.length) {
+          symbolList.innerHTML = data.results.map(r => `
+            <div class="autocomplete-item" onclick="selectSymbol('${r.symbol}', ${r.segment_id}, ${r.token}, ${r.lot||1})">
+              <span><strong>${r.symbol}</strong> - ${r.name || r.symbol}</span>
+              <span class="badge">${r.exchange || 'NSE'} (Seg: ${r.segment_id})</span>
+            </div>
+          `).join('');
+          symbolList.style.display = 'block';
+        } else {
+          symbolList.style.display = 'none';
+        }
+      } catch(e) {
+        symbolList.style.display = 'none';
+      }
+    }, 200);
+  });
+
+  window.selectSymbol = (sym, seg, tok, lot) => {
+    symbolInput.value = sym;
+    $('apiSegment').value = seg;
+    $('apiToken').value = tok;
+    if(lot && lot > 1) {
+      $('perTradeQty').value = lot;
+      updateQtyHint();
+    }
+    symbolList.style.display = 'none';
+  };
+
+  document.addEventListener('click', e => {
+    if(!symbolInput.contains(e.target) && !symbolList.contains(e.target)) {
+      symbolList.style.display = 'none';
+    }
+  });
+
+  // Fetch historical data from Choice API
+  $('fetchApiBtn').addEventListener('click', async () => {
+    const btn = $('fetchApiBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Fetching candles from Choice API...';
+    $('appStatus').textContent = 'Contacting Choice OpenAPI...';
+
+    const payload = {
+      segment_id: +$('apiSegment').value,
+      token: +$('apiToken').value,
+      from_date: $('apiFromDate').value,
+      to_date: $('apiToDate').value,
+      interval: $('apiResolution').value
+    };
+
+    try {
+      const res = await fetch('/api/historical', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if(data.status !== 'success' || !data.bars || !data.bars.length) {
+        throw new Error(data.message || 'No candle data returned for selection.');
+      }
+
+      // Convert bars to simulator format
+      allBars = data.bars.map(b => ({
+        dt: parseDate(b.dt) || new Date(b.dt),
+        o: +b.o,
+        h: +b.h,
+        l: +b.l,
+        c: +b.c,
+        v: +b.v || 0
+      })).filter(b => b.dt && !isNaN(b.dt.getTime()));
+
+      allBars.sort((a,b) => a.dt - b.dt);
+      dates = [...new Set(allBars.map(b => dateKey(b.dt)))];
+
+      $('tradeDate').innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+      $('tradeDate').value = dates.at(-1);
+      $('tradeDate').disabled = false;
+      setSelectionUI();
+
+      $('appStatus').textContent = `Loaded ${allBars.length.toLocaleString()} candles · ${dates.length} dates · ${symbolInput.value}`;
+      
+      // Auto prepare and render simulation preview immediately
+      prepare();
+
+    } catch(err) {
+      alert('Historical Data Fetch Error: ' + err.message);
+      $('appStatus').textContent = 'API Error: ' + err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⚡ Fetch Historical Data';
+    }
+  });
+
+  // CSV Parsing
+  function splitCSVLine(line, delim){let out=[],v='',q=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){if(q&&line[i+1]==='"'){v+='"';i++;}else q=!q;}else if(c===delim&&!q){out.push(v);v='';}else v+=c;}out.push(v);return out;}
+  function parseDate(raw){if(!raw)return null;const s=String(raw).trim();let m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);if(m)return new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0),+(m[6]||0));m=s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);if(m)return new Date(+m[1],+m[2]-1,+m[3],+(m[4]||0),+(m[5]||0),+(m[6]||0));const d=new Date(s);return isNaN(d)?null:d;}
+  function dateKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+  function timeKey(d){return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
+  
+  function parseCSV(text){const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim());if(lines.length<2)throw Error('CSV has no data rows.');const delim=(lines[0].match(/;/g)||[]).length>(lines[0].match(/,/g)||[]).length?';':',';const headers=splitCSVLine(lines[0],delim).map(norm);const exact=(...names)=>headers.findIndex(h=>names.includes(h));const like=(...names)=>headers.findIndex(h=>names.some(n=>h===n||h.startsWith(n)||h.includes(n)));const iDT=like('timestampisoist','datetime','timestamp','dateandtime','datetimeist'),iD=exact('date','tradedate'),iT=exact('time','tradetime'),iO=exact('open','o'),iH=exact('high','h'),iL=exact('low','l'),iC=exact('close','c','ltp'),iV=exact('volume','vol','v');if([iO,iH,iL,iC].some(i=>i<0)||(iDT<0&&iD<0))throw Error('Required columns not found: timestamp/date, open, high, low, close.');const bars=[];let invalid=0;for(let n=1;n<lines.length;n++){const a=splitCSVLine(lines[n],delim);let raw=iDT>=0?a[iDT]:`${a[iD]} ${iT>=0?a[iT]:'00:00'}`;const dt=parseDate(raw),o=+String(a[iO]).replace(/,/g,''),h=+String(a[iH]).replace(/,/g,''),l=+String(a[iL]).replace(/,/g,''),c=+String(a[iC]).replace(/,/g,'');if(dt&&[o,h,l,c].every(Number.isFinite)){if(h<Math.max(o,c)||l>Math.min(o,c)||h<l){invalid++;continue;}bars.push({dt,o,h,l,c,v:iV>=0?(+a[iV]||0):0});}}bars.sort((a,b)=>a.dt-b.dt);if(!bars.length)throw Error('No valid OHLC rows could be parsed.');if(invalid)$('appStatus').textContent=`Warning: ${invalid} invalid OHLC rows skipped`;return bars;}
+  
+  $('csvFile').addEventListener('change',async e=>{
+    try{
+      allBars=parseCSV(await e.target.files[0].text());
+      dates=[...new Set(allBars.map(b=>dateKey(b.dt)))];
+      $('tradeDate').innerHTML=dates.map(d=>`<option value="${d}">${d}</option>`).join('');
+      $('tradeDate').value=dates.at(-1);
+      $('tradeDate').disabled=false;
+      setSelectionUI();
+      $('appStatus').textContent=`${allBars.length.toLocaleString()} candles · ${dates.length} dates · Latest selected`;
+      prepare();
+    }catch(err){
+      alert(err.message);
+      $('appStatus').textContent='CSV error';
+    }
+  });
+
+  function setSelectionUI(){const m=$('selectionMode').value;$('tradeDate').disabled=!allBars.length||m==='time';$('startTime').disabled=m==='date';$('endTime').disabled=m==='date';}
+  
+  $('selectionMode').addEventListener('change', () => { setSelectionUI(); if(allBars.length) prepare(); });
+  $('tradeDate').addEventListener('change', () => { if(allBars.length) prepare(); });
+  $('direction').addEventListener('change', () => { if(prepared) prepare(); });
+  $('priceSource').addEventListener('change', () => { if(prepared) prepare(); });
+  $('startPrice').addEventListener('input', () => { if(prepared) prepare(); });
+  $('gridStep').addEventListener('input', () => { if(prepared) prepare(); });
+  $('squarePoints').addEventListener('input', () => { if(prepared) prepare(); });
+  $('startTime').addEventListener('change', () => { if(prepared) prepare(); });
+  $('endTime').addEventListener('change', () => { if(prepared) prepare(); });
+
+  function config(){const perQty=Math.max(1,Math.floor(+$('perTradeQty').value)),maxLots=Math.max(1,Math.floor(+$('maxOpenLots').value));return{selection:$('selectionMode').value,dir:$('direction').value,start:$('startTime').value,end:$('endTime').value,source:$('priceSource').value,startPrice:Math.max(0,+$('startPrice').value),step:Math.max(.01,+$('gridStep').value),square:Math.max(.01,+$('squarePoints').value),perQty,maxLots,totalQty:perQty*maxLots,maxP:Math.max(0,+$('maxProfit').value),maxL:Math.max(0,+$('maxLoss').value),cost:Math.max(0,+$('costs').value)}}
+  function updateQtyHint(){const perQty=Math.max(1,Math.floor(+$('perTradeQty').value)),maxLots=Math.max(1,Math.floor(+$('maxOpenLots').value));$('qtyHint').textContent=`Maximum open quantity: ${perQty} × ${maxLots} = ${(perQty*maxLots).toLocaleString('en-IN')}`;}
+  $('perTradeQty').addEventListener('input',updateQtyHint);$('maxOpenLots').addEventListener('input',updateQtyHint);updateQtyHint();
+  
+  function levelKey(level){return Number(level.toFixed(8));}
+  function queueLevel(level){const key=levelKey(level);if(!pendingLevels.some(x=>levelKey(x)===key)&&!positions.some(p=>levelKey(p.entry)===key))pendingLevels.push(level);}
+  function resetLadder(){pendingLevels=[];queueLevel(anchorPrice);}
+  
+  function prepare(){
+    stop();
+    if(!allBars.length){
+      $('empty').style.display='grid';
+      return;
+    }
+    const c=config(), day=$('tradeDate').value || (dates.length ? dates.at(-1) : '');
+    
+    sessionBars=allBars.filter(b=>{
+      const d=dateKey(b.dt),t=timeKey(b.dt);
+      if(c.selection==='date')return d>=day;
+      if(c.selection==='time')return t>=c.start&&t<=c.end;
+      return d===day&&t>=c.start&&t<=c.end;
+    });
+
+    // Fallback if strict time window filtered everything on that day
+    if(!sessionBars.length && c.selection==='both' && day){
+      sessionBars=allBars.filter(b=>dateKey(b.dt)===day);
+    }
+    if(!sessionBars.length && allBars.length){
+      sessionBars=allBars.slice(-100);
+    }
+
+    if(!sessionBars.length){
+      $('empty').style.display='grid';
+      $('empty').textContent='No candles available for the selected date/time.';
+      return;
+    }
+
+    idx=0;
+    positions=[];
+    pendingLevels=[];
+    trades=[];
+    strategyStopped=false;
+    sessionStartRealised=0;
+    lastSquareOffPrice=NaN;
+    maxQtyUsed=0;
+    cumulativeEntryQty=0;
+    equityHistory=[];
+    grotPeak=0;
+    onePeak=0;
+    maxGrotDD=0;
+    maxOneDD=0;
+    worstGrot=0;
+    worstOne=0;
+    peakCapital=0;
+    
+    anchorPrice = (c.source==='market' || c.startPrice<=0) ? sessionBars[0].c : c.startPrice;
+    benchmarkAnchor = anchorPrice;
+    resetLadder();
+    prepared=true;
+
+    ['playBtn','pauseBtn','nextBtn','resetBtn','prepareBtn','topPlayBtn','topPauseBtn','topNextBtn','topResetBtn','topPrepareBtn'].forEach(id=>{
+      if($(id)) $(id).disabled=false;
+    });
+
+    $('empty').style.display='none';
+    $('appStatus').textContent=`Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
+    update();
+  }
+  function highest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=-Infinity;for(let i=start;i<=end;i++)x=Math.max(x,a[i][k]);return end-start+1>=len?x:NaN;}
+  function lowest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=Infinity;for(let i=start;i<=end;i++)x=Math.min(x,a[i][k]);return end-start+1>=len?x:NaN;}
+  function calcRSI(a,i,len){if(i<len)return NaN;let g=0,l=0;for(let j=i-len+1;j<=i;j++){let d=a[j].c-a[j-1].c;if(d>0)g+=d;else l-=d;}if(l===0)return 100;return 100-(100/(1+(g/len)/(l/len)));}
+  function netQty(){return positions.reduce((s,p)=>s+p.qty,0);}
+  function avgPrice(){const q=netQty();return q?positions.reduce((s,p)=>s+p.entry*p.qty,0)/q:NaN;}
+  function openPnl(price){return positions.reduce((s,p)=>s+(price-p.entry)*(p.side==='buy'?1:-1)*p.qty,0);}
+  function addEntry(level,b,c){const room=c.totalQty-netQty(),qty=c.perQty;if(room<qty||positions.some(p=>levelKey(p.entry)===levelKey(level)))return false;positions.push({side:c.dir,entry:level,entryTime:b.dt,qty,level});cumulativeEntryQty+=qty;maxQtyUsed=Math.max(maxQtyUsed,netQty());queueLevel(c.dir==='buy'?level-c.step:level+c.step);$('appStatus').textContent=`${c.dir==='buy'?'BUY':'SHORT'} ${qty} @ ${fmt(level)}`;return true;}
+  function closeOne(p,price,b,reason,c){const gross=(price-p.entry)*(p.side==='buy'?1:-1)*p.qty,net=gross-c.cost;trades.push({...p,exit:price,exitTime:b.dt,gross,net,reason});positions=positions.filter(x=>x!==p);}
+  function closeAll(b,reason,c){for(const p of [...positions])closeOne(p,b.c,b,reason,c);$('appStatus').textContent=`${reason} · All positions closed`;}
+  function realisedNet(){return trades.reduce((s,t)=>s+t.net,0);}
+  function currentCapital(){return positions.reduce((s,p)=>s+p.entry*p.qty,0);}
+  function oneTimePnl(price,c){return(price-benchmarkAnchor)*(c.dir==='buy'?1:-1)*c.totalQty;}
+  function recordMetrics(b,c){const grot=realisedNet()+openPnl(b.c),one=oneTimePnl(b.c,c);grotPeak=Math.max(grotPeak,grot);onePeak=Math.max(onePeak,one);maxGrotDD=Math.max(maxGrotDD,grotPeak-grot);maxOneDD=Math.max(maxOneDD,onePeak-one);worstGrot=Math.min(worstGrot,grot);worstOne=Math.min(worstOne,one);peakCapital=Math.max(peakCapital,currentCapital());equityHistory.push({dt:b.dt,grot,one});}
+  function processTargets(b,c){const blocked=new Set();let latestTarget=NaN;for(const p of [...positions]){const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;const hit=p.side==='buy'?b.h>=target:b.l<=target;if(hit){latestTarget=target;closeOne(p,target,b,'STEP SQUARE-OFF',c);}}if(Number.isFinite(latestTarget)){lastSquareOffPrice=latestTarget;pendingLevels=[];let chase=c.dir==='buy'?latestTarget-c.step:latestTarget+c.step;while(positions.some(p=>levelKey(p.entry)===levelKey(chase)))chase=c.dir==='buy'?chase-c.step:chase+c.step;blocked.add(levelKey(chase));queueLevel(chase);$('appStatus').textContent=`SQUARE-OFF ${fmt(latestTarget)} · NEXT ${c.dir==='buy'?'BUY':'SHORT'} ${fmt(chase)}`;}return blocked;}
+  function processEntries(b,c,blocked){let safety=0;while(netQty()+c.perQty<=c.totalQty&&safety++<c.maxLots*3){pendingLevels=pendingLevels.filter(level=>!positions.some(p=>levelKey(p.entry)===levelKey(level)));pendingLevels.sort((a,z)=>c.dir==='buy'?z-a:a-z);const i=pendingLevels.findIndex(level=>!blocked.has(levelKey(level))&&(c.dir==='buy'?b.l<=level:b.h>=level));if(i<0)break;const level=pendingLevels.splice(i,1)[0];if(!addEntry(level,b,c))break;}}
+  function step(){
+    if(!prepared||idx>=sessionBars.length){stop();return;}
+    const c=config(),b=sessionBars[idx],newDay=idx===0||dateKey(sessionBars[idx-1].dt)!==dateKey(b.dt);
+    if(idx===0||(c.selection==='time'&&newDay)){
+      anchorPrice=c.source==='market'?b.c:c.startPrice;
+      resetLadder();
+      if(idx>0){
+        strategyStopped=false;
+        sessionStartRealised=realisedNet();
+      }
+    }
+    const blocked=processTargets(b,c),
+          sessionPnl=realisedNet()-sessionStartRealised+openPnl(b.c),
+          lastBar=idx===sessionBars.length-1,
+          nextDay=!lastBar&&dateKey(sessionBars[idx+1].dt)!==dateKey(b.dt),
+          intradayDayEnd=c.selection!=='date'&&nextDay,
+          selectedTimeEnd=c.selection!=='date'&&timeKey(b.dt)>=c.end;
+          
+    if(!strategyStopped&&c.maxP>0&&sessionPnl>=c.maxP){
+      if(positions.length)closeAll(b,'MAX PROFIT',c);
+      strategyStopped=true;
+      $('appStatus').textContent='MAX PROFIT · Session stopped';
+    }else if(!strategyStopped&&c.maxL>0&&sessionPnl<=-c.maxL){
+      if(positions.length)closeAll(b,'MAX LOSS',c);
+      strategyStopped=true;
+      $('appStatus').textContent='MAX LOSS · Session stopped';
+    }
+    
+    if(lastBar||intradayDayEnd||selectedTimeEnd){
+      if(positions.length)closeAll(b,lastBar?'FINAL EXIT':'TIME EXIT',c);
+    }else if(!strategyStopped){
+      processEntries(b,c,blocked);
+    }
+    recordMetrics(b,c);
+    update();
+    idx++;
+    if(idx>=sessionBars.length){
+      stop();
+      $('appStatus').textContent='Simulation completed all bars';
+    }
+  }
+  
+  function play(){
+    if(!prepared || !sessionBars.length){
+      prepare();
+    }
+    if(!sessionBars.length){
+      alert('Please fetch data or select a valid date/time range first.');
+      return;
+    }
+    if(idx>=sessionBars.length) idx=0;
+    stop();
+    const speed = +$('speed').value || 250;
+    timer=setInterval(step, speed);
+    $('appStatus').textContent='Replay running · ' + sessionBars.length + ' candles';
+  }
+  
+  function stop(){
+    if(timer){
+      clearInterval(timer);
+      timer=null;
+    }
+  }
+
+  window.play = play;
+  window.prepare = prepare;
+  window.pauseReplay = () => { stop(); $('appStatus').textContent='Replay paused'; };
+  window.stepReplay = () => { stop(); if(!prepared) prepare(); step(); };
+
+  $('prepareBtn').onclick=prepare;
+  $('playBtn').onclick=play;
+  $('pauseBtn').onclick=window.pauseReplay;
+  $('nextBtn').onclick=window.stepReplay;
+  $('resetBtn').onclick=prepare;
+  function stamp(d){return timeKey(d)==='00:00'?dateKey(d):`${dateKey(d)} ${timeKey(d)}`;}
+  function update(){const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config(),open=b?openPnl(b.c):0,gross=trades.reduce((s,t)=>s+t.gross,0),cost=trades.reduce((s,t)=>s+(t.gross-t.net),0),net=gross-cost,wins=trades.filter(t=>t.net>0).length,grotTotal=net+open,onePnl=b?oneTimePnl(b.c,c):0,adv=grotTotal-onePnl,avgHold=trades.length?trades.reduce((s,t)=>s+(t.exitTime-t.entryTime)/60000,0)/trades.length:0,scalpsHour=trades.length/Math.max(1/60,equityHistory.length/60),ddChange=maxOneDD>0?(maxGrotDD/maxOneDD-1)*100:0,returnCapital=peakCapital?grotTotal/peakCapital*100:0,recovery=maxGrotDD?grotTotal/maxGrotDD:0;$('sTime').textContent=b?stamp(b.dt):'—';$('sPosition').textContent=positions.length?`${c.dir==='buy'?'BUY':'SHORT'} ${netQty()}`:'0';$('sPosition').className=positions.length?(c.dir==='buy'?'green':'red'):'';$('sEntry').textContent=positions.length?fmt(avgPrice()):'—';$('sCurrent').textContent=b?fmt(b.c):'—';$('sOpen').textContent=money(open);$('sOpen').className=open>=0?'green':'red';$('sTotal').textContent=money(grotTotal);$('sTotal').className=grotTotal>=0?'green':'red';$('sumTrades').textContent=trades.length;$('sumActive').textContent=positions.length;$('sumQtyCap').textContent=c.totalQty;$('sumMaxQty').textContent=maxQtyUsed;$('sumCumulativeQty').textContent=cumulativeEntryQty;$('sumAvailableQty').textContent=Math.max(0,c.totalQty-netQty());$('sumWins').textContent=wins;$('sumWinRate').textContent=trades.length?fmt(wins/trades.length*100)+'%':'0%';$('sumGross').textContent=money(gross);$('sumCosts').textContent=money(cost);$('sumNet').textContent=money(grotTotal);$('sumNet').className=grotTotal>=0?'green':'red';$('oneEntry').textContent=`${c.dir==='buy'?'BUY':'SHORT'} @ ${fmt(benchmarkAnchor)}`;$('oneQty').textContent=c.totalQty;$('onePnl').textContent=money(onePnl);$('onePnl').className=onePnl>=0?'green':'red';$('grotAdv').textContent=money(adv);$('grotAdv').className=adv>=0?'green':'red';$('mGrotDD').textContent=ddMoney(maxGrotDD);$('mOneDD').textContent=ddMoney(maxOneDD);$('mDDReduction').textContent=maxOneDD?`${ddChange>=0?'+':''}${fmt(ddChange)}% ${ddChange>0?'worse':'lower'}`:'0%';$('mDDReduction').className=ddChange<=0?'green':'red';$('mWorstGrot').textContent=money(worstGrot);$('mWorstGrot').className=worstGrot>=0?'green':'red';$('mWorstOne').textContent=money(worstOne);$('mWorstOne').className=worstOne>=0?'green':'red';$('mPeakCapital').textContent=money(peakCapital);$('mReturnCapital').textContent=fmt(returnCapital)+'%';$('mRecovery').textContent=fmt(recovery)+'×';$('mAvgHold').textContent=fmt(avgHold)+' min';$('mScalpsHour').textContent=fmt(scalpsHour);$('mLocked').textContent=money(net);$('mLocked').className=net>=0?'green':'red';$('mWinner').textContent=maxGrotDD<maxOneDD?'GROT':maxGrotDD>maxOneDD?'ONE-TIME':'TIE';$('mWinner').className=maxGrotDD<=maxOneDD?'green':'red';$('tradeLog').innerHTML=trades.length?trades.map((t,i)=>`<tr><td>${i+1}</td><td class="${t.side==='buy'?'green':'red'}">${t.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(t.entryTime)} @ ${fmt(t.entry)}</td><td>${stamp(t.exitTime)} @ ${fmt(t.exit)}</td><td>${t.qty}</td><td class="${t.net>=0?'green':'red'}">${money(t.net)}</td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7">No completed trades</td></tr>';draw();drawEquity();}
+  function draw(){
+    const canvas=$('chart');
+    if(!canvas) return;
+    const rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;
+    canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;
+    const x=canvas.getContext('2d');x.scale(dpr,dpr);
+    const W=rect.width,H=rect.height;x.fillStyle='#081524';x.fillRect(0,0,W,H);
+    if(!sessionBars.length)return;
+    
+    const c=config();
+    const currentIdx = Math.min(idx, sessionBars.length - 1);
+    const visibleStart = Math.max(0, currentIdx - 79);
+    const a = sessionBars.slice(visibleStart, currentIdx + 1);
+    
+    const orderedPending=pendingLevels.slice().sort((u,v)=>c.dir==='buy'?v-u:u-v);
+    const pendingToShow=orderedPending.slice(0,Math.min(5,c.maxLots));
+    const targets=positions.map(p=>p.side==='buy'?p.entry+c.square:p.entry-c.square);
+    const scalePrices=[...a.flatMap(b=>[b.h,b.l]),...positions.map(p=>p.entry),...targets,...pendingToShow];
+    let hi=Math.max(...scalePrices),lo=Math.min(...scalePrices);const pad=(hi-lo||1)*.12;hi+=pad;lo-=pad;
+    const left=12,right=145,top=28,bottom=45,cw=(W-left-right)/Math.max(a.length,1),Y=p=>top+(hi-p)/(hi-lo)*(H-top-bottom);
+    x.font='12px Inter, Segoe UI, Arial';x.strokeStyle='#1c3047';x.lineWidth=1;
+    for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const p=hi-i*(hi-lo)/4;x.fillStyle='#7890aa';x.fillText(fmt(p),W-right+7,y+4);}
+    a.forEach((b,j)=>{const cx=left+j*cw+cw/2,up=b.c>=b.o;x.strokeStyle=up?'#20d68f':'#ff5d6c';x.fillStyle=x.strokeStyle;x.beginPath();x.moveTo(cx,Y(b.h));x.lineTo(cx,Y(b.l));x.stroke();const y=Math.min(Y(b.o),Y(b.c)),h=Math.max(2,Math.abs(Y(b.o)-Y(b.c)));x.fillRect(cx-Math.max(1,cw*.28),y,Math.max(2,cw*.56),h);});
+    const labelCount=Math.min(6,a.length),used=new Set();for(let n=0;n<labelCount;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labelCount-1));if(used.has(j))continue;used.add(j);const cx=left+j*cw+cw/2,d=a[j].dt,label=timeKey(d)==='00:00'?`${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}`:timeKey(d);x.strokeStyle='#263b55';x.beginPath();x.moveTo(cx,H-bottom);x.lineTo(cx,H-bottom+5);x.stroke();x.fillStyle='#90a4bc';x.textAlign='center';x.fillText(label,cx,H-14);}x.textAlign='left';
+    const line=(price,color,dash,label)=>{const y=Y(price);x.strokeStyle=color;x.lineWidth=1.5;x.setLineDash(dash);x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();x.setLineDash([]);x.fillStyle=color;x.font='bold 12px Inter, Segoe UI, Arial';x.fillText(label,W-right+7,y+4);};
+    for(const p of positions){const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;line(p.entry,'#ffd166',[7,5],`${p.side==='buy'?'BUY':'SHORT'} ${fmt(p.entry)}`);line(target,'#43a5ff',[3,5],`${p.side==='buy'?'SELL TARGET':'COVER TARGET'} ${fmt(target)}`);}
+    pendingToShow.forEach((price,n)=>line(price,n===0?'#20d68f':'#168d65',n===0?[8,4]:[3,6],`${n===0?'NEXT ':''}${c.dir==='buy'?'BUY':'SHORT'} ${fmt(price)}`));
+    if(positions.length){x.fillStyle='#ffd166';x.font='bold 12px Inter, Segoe UI, Arial';x.fillText('AVG '+fmt(avgPrice()),left+5,Y(avgPrice())-5);}
+    $('legend').textContent=a.length?`OHLC  ${fmt(a.at(-1).o)}  ${fmt(a.at(-1).h)}  ${fmt(a.at(-1).l)}  ${fmt(a.at(-1).c)} · Bar ${currentIdx+1}/${sessionBars.length} · Active ${positions.length} · Pending ${pendingLevels.length}`:'OHLC —';
+  }
+  function drawEquity(){const canvas=$('equityChart'),rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;const x=canvas.getContext('2d');x.scale(dpr,dpr);const W=rect.width,H=rect.height;x.fillStyle='#0b1829';x.fillRect(0,0,W,H);if(!equityHistory.length){x.fillStyle='#90a4bc';x.fillText('Start replay to build GROT vs One-Time equity curve',18,28);return;}const a=equityHistory.slice(-800),vals=a.flatMap(p=>[p.grot,p.one,0]),hi=Math.max(...vals),lo=Math.min(...vals),pad=(hi-lo||1)*.12,left=62,right=14,top=24,bottom=30,Y=v=>top+(hi+pad-v)/(hi-lo+2*pad)*(H-top-bottom),X=i=>left+i*(W-left-right)/Math.max(1,a.length-1);x.strokeStyle='#263b55';for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const v=hi+pad-i*(hi-lo+2*pad)/4;x.fillStyle='#90a4bc';x.fillText('₹'+Math.round(v).toLocaleString('en-IN'),4,y+4);}const line=(key,color)=>{x.strokeStyle=color;x.lineWidth=2;x.beginPath();a.forEach((p,i)=>{const px=X(i),py=Y(p[key]);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();};line('grot','#20d68f');line('one','#43a5ff');x.fillStyle='#20d68f';x.fillRect(left,7,16,3);x.fillText('GROT',left+22,12);x.fillStyle='#43a5ff';x.fillRect(left+82,7,16,3);x.fillText('One-Time',left+104,12);const labels=Math.min(5,a.length);x.fillStyle='#90a4bc';x.textAlign='center';for(let n=0;n<labels;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labels-1));x.fillText(timeKey(a[j].dt),X(j),H-9);}x.textAlign='left';}
+  function refreshOpenOrders(){const el=$('openOrderLog');if(!el)return;const b=sessionBars.length?sessionBars[Math.min(idx,sessionBars.length-1)]:null,c=config();if(!positions.length||!b){el.innerHTML='<tr><td colspan="8">No open orders</td></tr>';return;}el.innerHTML=positions.slice().sort((a,z)=>c.dir==='buy'?z.entry-a.entry:a.entry-z.entry).map((p,i)=>{const target=p.side==='buy'?p.entry+c.square:p.entry-c.square,live=(b.c-p.entry)*(p.side==='buy'?1:-1)*p.qty;return `<tr><td>${i+1}</td><td class="${p.side==='buy'?'green':'red'}">${p.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(p.entryTime)} @ ${fmt(p.entry)}</td><td class="yellow">${p.side==='buy'?'SELL':'COVER'} @ ${fmt(target)}</td><td>${fmt(b.c)}</td><td>${p.qty}</td><td class="${live>=0?'green':'red'}">${money(live)}</td><td class="yellow">OPEN</td></tr>`;}).join('');}
+  function refreshNextTriggers(){const el=$('nextTriggers'),ref=$('lastSquareRef');if(!el||!ref)return;const c=config();ref.textContent=Number.isFinite(lastSquareOffPrice)?fmt(lastSquareOffPrice):'No square-off yet';el.textContent=pendingLevels.length?pendingLevels.slice().sort((a,z)=>c.dir==='buy'?z-a:a-z).slice(0,6).map(v=>fmt(v)).join(' · '):'—';}
+  setInterval(()=>{refreshNextTriggers();refreshOpenOrders();},250);
+  addEventListener('resize',()=>{draw();drawEquity();});
+})();
+</script>
+</body>
+</html>
