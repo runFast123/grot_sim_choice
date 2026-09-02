@@ -701,7 +701,7 @@
     return new Date(epoch1980.getTime() + secOffset * 1000);
   }
 
-  function parse1980Seconds(dateVal) {
+  function parse1980Seconds(dateVal, isEnd = false) {
     const epoch1980 = new Date(1980, 0, 1, 0, 0, 0);
     let dt;
     if(dateVal instanceof Date) {
@@ -711,11 +711,11 @@
       if(str.includes(' ')) {
         const [dPart, tPart] = str.split(' ');
         const [y, m, d] = dPart.split('-').map(Number);
-        const [h, min, s] = (tPart || '00:00:00').split(':').map(Number);
+        const [h, min, s] = (tPart || (isEnd ? '23:59:59' : '00:00:00')).split(':').map(Number);
         dt = new Date(y, m - 1, d, h || 0, min || 0, s || 0);
       } else {
         const [y, m, d] = str.split('-').map(Number);
-        dt = new Date(y, m - 1, d, 0, 0, 0);
+        dt = new Date(y, m - 1, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0);
       }
     }
     return Math.floor((dt.getTime() - epoch1980.getTime()) / 1000);
@@ -776,8 +776,8 @@
 
     // Attempt 1: Direct Browser-to-Choice fetch (matches user's local ISP static IP directly)
     try {
-      const fromSec = parse1980Seconds(fromDate);
-      const toSec = parse1980Seconds(toDate);
+      const fromSec = parse1980Seconds(fromDate, false);
+      const toSec = parse1980Seconds(toDate, true);
       const directHeaders = {
         'Content-Type': 'application/json',
         'VendorId': vendorId,
@@ -1082,8 +1082,26 @@
     
     const c=config();
     const currentIdx = Math.min(idx, sessionBars.length - 1);
-    const visibleStart = Math.max(0, currentIdx - 79);
-    const a = sessionBars.slice(visibleStart, currentIdx + 1);
+    
+    // Visible window: show up to 120 bars from the session or full session if smaller
+    const windowSize = Math.min(120, sessionBars.length);
+    let visibleStart = 0;
+    let visibleEnd = sessionBars.length;
+    
+    if (sessionBars.length > windowSize) {
+      if (currentIdx < windowSize * 0.5) {
+        visibleStart = 0;
+        visibleEnd = windowSize;
+      } else if (currentIdx > sessionBars.length - windowSize * 0.5) {
+        visibleStart = sessionBars.length - windowSize;
+        visibleEnd = sessionBars.length;
+      } else {
+        visibleStart = Math.max(0, Math.floor(currentIdx - windowSize * 0.5));
+        visibleEnd = Math.min(sessionBars.length, visibleStart + windowSize);
+      }
+    }
+    
+    const a = sessionBars.slice(visibleStart, visibleEnd);
     
     const orderedPending=pendingLevels.slice().sort((u,v)=>c.dir==='buy'?v-u:u-v);
     const pendingToShow=orderedPending.slice(0,Math.min(5,c.maxLots));
@@ -1093,13 +1111,42 @@
     const left=12,right=145,top=28,bottom=45,cw=(W-left-right)/Math.max(a.length,1),Y=p=>top+(hi-p)/(hi-lo)*(H-top-bottom);
     x.font='12px Inter, Segoe UI, Arial';x.strokeStyle='#1c3047';x.lineWidth=1;
     for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const p=hi-i*(hi-lo)/4;x.fillStyle='#7890aa';x.fillText(fmt(p),W-right+7,y+4);}
-    a.forEach((b,j)=>{const cx=left+j*cw+cw/2,up=b.c>=b.o;x.strokeStyle=up?'#20d68f':'#ff5d6c';x.fillStyle=x.strokeStyle;x.beginPath();x.moveTo(cx,Y(b.h));x.lineTo(cx,Y(b.l));x.stroke();const y=Math.min(Y(b.o),Y(b.c)),h=Math.max(2,Math.abs(Y(b.o)-Y(b.c)));x.fillRect(cx-Math.max(1,cw*.28),y,Math.max(2,cw*.56),h);});
+    
+    a.forEach((b,j)=>{
+      const barGlobalIdx = visibleStart + j;
+      const cx=left+j*cw+cw/2,up=b.c>=b.o;
+      const isReplayed = barGlobalIdx <= currentIdx;
+      const isCurrent = barGlobalIdx === currentIdx;
+
+      if (isCurrent) {
+        x.strokeStyle = up ? '#20d68f' : '#ff5d6c';
+        x.fillStyle = x.strokeStyle;
+        x.save();
+        x.fillStyle = '#ffd16622';
+        x.fillRect(cx - Math.max(2, cw*0.48), top, Math.max(4, cw*0.96), H-top-bottom);
+        x.restore();
+      } else if (isReplayed) {
+        x.strokeStyle = up ? '#20d68f' : '#ff5d6c';
+        x.fillStyle = x.strokeStyle;
+      } else {
+        x.strokeStyle = up ? 'rgba(32, 214, 143, 0.45)' : 'rgba(255, 93, 108, 0.45)';
+        x.fillStyle = x.strokeStyle;
+      }
+
+      x.lineWidth = isCurrent ? 2 : 1;
+      x.beginPath();x.moveTo(cx,Y(b.h));x.lineTo(cx,Y(b.l));x.stroke();
+      const y=Math.min(Y(b.o),Y(b.c)),h=Math.max(2,Math.abs(Y(b.o)-Y(b.c)));
+      x.fillRect(cx-Math.max(1,cw*.28),y,Math.max(2,cw*.56),h);
+    });
+    
     const labelCount=Math.min(6,a.length),used=new Set();for(let n=0;n<labelCount;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labelCount-1));if(used.has(j))continue;used.add(j);const cx=left+j*cw+cw/2,d=a[j].dt,label=timeKey(d)==='00:00'?`${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}`:timeKey(d);x.strokeStyle='#263b55';x.beginPath();x.moveTo(cx,H-bottom);x.lineTo(cx,H-bottom+5);x.stroke();x.fillStyle='#90a4bc';x.textAlign='center';x.fillText(label,cx,H-14);}x.textAlign='left';
     const line=(price,color,dash,label)=>{const y=Y(price);x.strokeStyle=color;x.lineWidth=1.5;x.setLineDash(dash);x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();x.setLineDash([]);x.fillStyle=color;x.font='bold 12px Inter, Segoe UI, Arial';x.fillText(label,W-right+7,y+4);};
     for(const p of positions){const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;line(p.entry,'#ffd166',[7,5],`${p.side==='buy'?'BUY':'SHORT'} ${fmt(p.entry)}`);line(target,'#43a5ff',[3,5],`${p.side==='buy'?'SELL TARGET':'COVER TARGET'} ${fmt(target)}`);}
     pendingToShow.forEach((price,n)=>line(price,n===0?'#20d68f':'#168d65',n===0?[8,4]:[3,6],`${n===0?'NEXT ':''}${c.dir==='buy'?'BUY':'SHORT'} ${fmt(price)}`));
     if(positions.length){x.fillStyle='#ffd166';x.font='bold 12px Inter, Segoe UI, Arial';x.fillText('AVG '+fmt(avgPrice()),left+5,Y(avgPrice())-5);}
-    $('legend').textContent=a.length?`OHLC  ${fmt(a.at(-1).o)}  ${fmt(a.at(-1).h)}  ${fmt(a.at(-1).l)}  ${fmt(a.at(-1).c)} · Bar ${currentIdx+1}/${sessionBars.length} · Active ${positions.length} · Pending ${pendingLevels.length}`:'OHLC —';
+    
+    const activeBar = sessionBars[currentIdx] || a.at(-1);
+    $('legend').textContent=activeBar ? `OHLC  O:${fmt(activeBar.o)}  H:${fmt(activeBar.h)}  L:${fmt(activeBar.l)}  C:${fmt(activeBar.c)} · Replay Bar ${currentIdx+1}/${sessionBars.length} (${sessionBars.length} Candles Loaded) · Active Orders: ${positions.length}` : 'OHLC —';
   }
   function drawEquity(){const canvas=$('equityChart'),rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;const x=canvas.getContext('2d');x.scale(dpr,dpr);const W=rect.width,H=rect.height;x.fillStyle='#0b1829';x.fillRect(0,0,W,H);if(!equityHistory.length){x.fillStyle='#90a4bc';x.fillText('Start replay to build GROT vs One-Time equity curve',18,28);return;}const a=equityHistory.slice(-800),vals=a.flatMap(p=>[p.grot,p.one,0]),hi=Math.max(...vals),lo=Math.min(...vals),pad=(hi-lo||1)*.12,left=62,right=14,top=24,bottom=30,Y=v=>top+(hi+pad-v)/(hi-lo+2*pad)*(H-top-bottom),X=i=>left+i*(W-left-right)/Math.max(1,a.length-1);x.strokeStyle='#263b55';for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const v=hi+pad-i*(hi-lo+2*pad)/4;x.fillStyle='#90a4bc';x.fillText('₹'+Math.round(v).toLocaleString('en-IN'),4,y+4);}const line=(key,color)=>{x.strokeStyle=color;x.lineWidth=2;x.beginPath();a.forEach((p,i)=>{const px=X(i),py=Y(p[key]);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();};line('grot','#20d68f');line('one','#43a5ff');x.fillStyle='#20d68f';x.fillRect(left,7,16,3);x.fillText('GROT',left+22,12);x.fillStyle='#43a5ff';x.fillRect(left+82,7,16,3);x.fillText('One-Time',left+104,12);const labels=Math.min(5,a.length);x.fillStyle='#90a4bc';x.textAlign='center';for(let n=0;n<labels;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labels-1));x.fillText(timeKey(a[j].dt),X(j),H-9);}x.textAlign='left';}
   function refreshOpenOrders(){const el=$('openOrderLog');if(!el)return;const b=sessionBars.length?sessionBars[Math.min(idx,sessionBars.length-1)]:null,c=config();if(!positions.length||!b){el.innerHTML='<tr><td colspan="8">No open orders</td></tr>';return;}el.innerHTML=positions.slice().sort((a,z)=>c.dir==='buy'?z.entry-a.entry:a.entry-z.entry).map((p,i)=>{const target=p.side==='buy'?p.entry+c.square:p.entry-c.square,live=(b.c-p.entry)*(p.side==='buy'?1:-1)*p.qty;return `<tr><td>${i+1}</td><td class="${p.side==='buy'?'green':'red'}">${p.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(p.entryTime)} @ ${fmt(p.entry)}</td><td class="yellow">${p.side==='buy'?'SELL':'COVER'} @ ${fmt(target)}</td><td>${fmt(b.c)}</td><td>${p.qty}</td><td class="${live>=0?'green':'red'}">${money(live)}</td><td class="yellow">OPEN</td></tr>`;}).join('');}

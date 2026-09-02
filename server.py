@@ -620,7 +620,7 @@ def search_scrip():
         "results": results[:30]
     })
 
-def parse_date_to_1980_seconds(date_val: str) -> int:
+def parse_date_to_1980_seconds(date_val: str, is_end: bool = False) -> int:
     """Calculates seconds since 1980-01-01 00:00:00 as required by Choice Historical API"""
     epoch_1980 = datetime.datetime(1980, 1, 1)
     date_str = str(date_val).strip()
@@ -629,10 +629,14 @@ def parse_date_to_1980_seconds(date_val: str) -> int:
             dt = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
         else:
             dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+            if is_end:
+                dt = dt.replace(hour=23, minute=59, second=59)
         return int((dt - epoch_1980).total_seconds())
     except Exception:
         # Default fallback
         dt = datetime.datetime.now()
+        if is_end:
+            dt = dt.replace(hour=23, minute=59, second=59)
         return int((dt - epoch_1980).total_seconds())
 
 @app.route("/api/historical", methods=["POST"])
@@ -664,50 +668,9 @@ def get_historical_candles():
             "message": "Active Choice Session ID is missing. Please click '🔑 Login / Settings' to authenticate or paste your active Session ID."
         }), 401
 
-    # If ChoiceClient SDK instance can be initialized
-    if HAS_CHOICE_PKG and creds.get("vendor_id") and creds.get("api_key"):
-        try:
-            client = ChoiceClient(
-                vendor_id=creds["vendor_id"],
-                api_key=creds["api_key"],
-                base_url=creds["base_url"]
-            )
-            if creds.get("session_id"):
-                client.session_id = creds["session_id"]
-            if creds.get("access_token"):
-                client.access_token = creds["access_token"]
-            
-            df = client.historical.get_historical_data(
-                segment_id=segment_id,
-                token=int(token),
-                from_date=from_date,
-                to_date=to_date,
-                resolution=interval
-            )
-            if not df.empty and "Time" in df.columns:
-                bars = []
-                for _, row in df.iterrows():
-                    dt_val = row["Time"]
-                    dt_str = dt_val.strftime("%Y-%m-%d %H:%M:%S") if hasattr(dt_val, "strftime") else str(dt_val)
-                    bars.append({
-                        "dt": dt_str,
-                        "o": float(row.get("Open", 0)),
-                        "h": float(row.get("High", 0)),
-                        "l": float(row.get("Low", 0)),
-                        "c": float(row.get("Close", 0)),
-                        "v": float(row.get("Volume", 0))
-                    })
-                return jsonify({
-                    "status": "success",
-                    "count": len(bars),
-                    "bars": bars
-                })
-        except Exception as e:
-            print(f"choice_client historical call exception: {e}, attempting direct HTTP request...")
-
     # Direct HTTP Request with 1980 epoch dates
-    from_sec = parse_date_to_1980_seconds(from_date)
-    to_sec = parse_date_to_1980_seconds(to_date)
+    from_sec = parse_date_to_1980_seconds(from_date, is_end=False)
+    to_sec = parse_date_to_1980_seconds(to_date, is_end=True)
 
     primary_url = f"{creds['base_url']}/api/OpenGraph/ChartData"
     alt_base = "https://finx.choiceindia.com" if "finxomne" in creds['base_url'] else "https://finxomne.choiceindia.com"
