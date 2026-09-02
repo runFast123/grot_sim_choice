@@ -1,8 +1,8 @@
 @echo off
-title KKunal GROT - Choice OpenAPI Simulator Server
+title GROT Scalper - Choice OpenAPI Simulator Server
 cd /d "%~dp0"
 echo ========================================================
-echo   KKunal GROT Dynamic Ladder Simulator (Choice OpenAPI)
+echo   GROT Scalper Dynamic Ladder Simulator (Choice OpenAPI)
 echo ========================================================
 echo.
 echo Checking & installing Python dependencies...

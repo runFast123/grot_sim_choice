@@ -605,7 +605,7 @@ def get_historical_candles():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print("=" * 65)
-    print(f"  KKunal GROT Simulator Server running on http://localhost:{port}")
+    print(f"  GROT Dynamic Ladder Simulator Server running on http://localhost:{port}")
     print(f"  Choice SDK: {'Loaded (kkunal-1.2.0)' if HAS_CHOICE_PKG else 'Fallback HTTP'}")
     print(f"  Session Status: {'Active Logged In' if auth_state['logged_in'] else 'Login Required'}")
     print("=" * 65)
