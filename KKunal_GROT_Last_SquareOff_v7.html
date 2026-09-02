@@ -129,7 +129,7 @@
     .empty-steps b{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#1d3b63;color:#d7f0ff;font-size:11px;flex:none}
     .legend{position:absolute;top:10px;left:12px;background:rgba(7,17,31,.82);padding:7px 10px;border-radius:8px;color:var(--muted);font-size:12px;border:1px solid var(--line-soft)}
 
-    .bottom{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:14px}
+    .bottom{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:14px;align-items:start}
     .table-wrap{overflow:auto;background:var(--panel-inner);border:1px solid var(--line-soft);border-radius:10px}
     table{width:100%;border-collapse:collapse;font-size:12px}
     th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
@@ -367,11 +367,11 @@
       </div>
     </div>
     <div class="bottom">
-      <div class="panel" style="display:flex;flex-direction:column;min-height:0">
+      <div class="panel">
         <div class="section-title">Open orders</div>
-        <div class="table-wrap" style="flex:none;max-height:160px;margin-bottom:18px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div>
+        <div class="table-wrap" style="max-height:160px;margin-bottom:18px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div>
         <div class="section-title" style="border-top:1px solid var(--line-soft);padding-top:16px">Completed orders</div>
-        <div class="table-wrap" style="flex:1;min-height:200px;max-height:260px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr></tbody></table></div>
+        <div class="table-wrap" style="max-height:260px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr></tbody></table></div>
       </div>
       <div class="panel" style="display:flex;flex-direction:column">
         <div class="section-title">GROT vs one-time entry</div>
