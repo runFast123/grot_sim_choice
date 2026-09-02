@@ -762,6 +762,13 @@ def get_historical_candles():
                             "bars": bars,
                             "gateway": current_url
                         })
+                    else:
+                        is_avail = chart_resp.get("IsDataAvailable", False)
+                        return jsonify({
+                            "status": "error",
+                            "message": f"Choice OpenAPI connected successfully, but returned no candles for Token {token} on Segment {segment_id} (IsDataAvailable={is_avail}).\n\nTips:\n• For NIFTY 50 Index use Token: 26000 (Segment: 1)\n• For BANKNIFTY Index use Token: 26009 (Segment: 1)\n• For SENSEX Index use Token: 1 (Segment: 3)\n• For stocks, search by name in the Symbol box.\n• Ensure the selected date range contains active market trading days.",
+                            "raw": res_json
+                        }), 404
         except Exception as e:
             last_resp_text = str(e)
             continue

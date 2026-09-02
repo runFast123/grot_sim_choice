@@ -74,13 +74,23 @@
           <input id="symbolInput" type="text" placeholder="Search NIFTY, RELIANCE, TCS..." value="NIFTY 50">
           <div class="autocomplete-list" id="symbolList"></div>
         </div>
+        
+        <!-- Popular Presets -->
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin:5px 0 8px">
+          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('NIFTY 50', 1, 26000, 50)">NIFTY (26000)</span>
+          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('BANKNIFTY', 1, 26009, 15)">BANKNIFTY (26009)</span>
+          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('FINNIFTY', 1, 26037, 25)">FINNIFTY (26037)</span>
+          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('SENSEX', 3, 1, 10)">SENSEX (1)</span>
+          <span style="font-size:10px;padding:2px 6px;background:#132a48;color:var(--blue);border-radius:4px;cursor:pointer" onclick="selectSymbol('RELIANCE', 1, 2885, 1)">RELIANCE (2885)</span>
+        </div>
+
         <div class="row">
           <div>
             <label>Segment</label>
             <select id="apiSegment">
-              <option value="1" selected>NSE Cash (1)</option>
+              <option value="1" selected>NSE Cash / Index (1)</option>
               <option value="2">NSE F&O (2)</option>
-              <option value="3">BSE Cash (3)</option>
+              <option value="3">BSE Cash / Index (3)</option>
               <option value="5">MCX (5)</option>
             </select>
           </div>
