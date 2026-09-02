@@ -11,7 +11,7 @@
       --accent:#6366f1;--radius:14px;--shadow:0 18px 40px rgba(0,0,0,.35);
     }
     *{box-sizing:border-box}
-    html,body{margin:0;min-height:100vh;overflow-x:hidden}
+    html,body{margin:0;min-height:100vh}
     body{
       background:radial-gradient(1200px 500px at 12% -10%,#163056 0%,transparent 55%),linear-gradient(180deg,#08111e,#070b14 40%);
       color:var(--text);font:14px/1.45 "Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
@@ -52,7 +52,7 @@
     .api-badge.disconnected{background:rgba(244,63,94,.12);color:#fda4af;border-color:rgba(244,63,94,.35)}
     .api-badge::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 4px color-mix(in srgb,currentColor 18%,transparent)}
 
-    main{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px;max-width:1680px;margin:0 auto}
+    main{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;padding:16px;max-width:1680px;margin:0 auto;align-items:start}
     .panel{background:rgba(16,26,43,.86);border:1px solid var(--line-soft);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
     .controls{display:flex;flex-direction:column;gap:14px;position:sticky;top:72px;max-height:calc(100vh - 88px);overflow:auto;padding-right:4px}
     .section{border-top:1px solid var(--line-soft);padding-top:14px}
@@ -129,15 +129,15 @@
     .empty-steps b{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#1d3b63;color:#d7f0ff;font-size:11px;flex:none}
     .legend{position:absolute;top:10px;left:12px;background:rgba(7,17,31,.82);padding:7px 10px;border-radius:8px;color:var(--muted);font-size:12px;border:1px solid var(--line-soft)}
 
-    .bottom{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:14px;align-items:start}
-    .table-wrap{overflow:auto;margin:0 -16px;padding:0 16px}
+    .bottom{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:14px}
+    .table-wrap{overflow:auto;background:var(--panel-inner);border:1px solid var(--line-soft);border-radius:10px}
     table{width:100%;border-collapse:collapse;font-size:12px}
     th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
-    thead th{position:sticky;top:0;background:#101a2b;color:var(--muted);font-weight:700;z-index:10;text-transform:uppercase;font-size:10px;letter-spacing:.05em}
+    thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-weight:700;z-index:10;text-transform:uppercase;font-size:10px;letter-spacing:.05em}
     tbody th{font-weight:600;color:var(--muted)}
     tbody tr:hover{background:rgba(255,255,255,.02)}
     tbody tr:last-child td, tbody tr:last-child th {border-bottom:none}
-    .table-empty{color:var(--muted);font-style:normal;text-align:center;padding:16px 12px}
+    .table-empty{color:var(--muted);font-style:normal;text-align:center;padding:24px 12px}
     .note{font-size:11px;color:var(--muted);line-height:1.55;margin-top:10px}
     .advanced-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:16px}
     .metric{background:linear-gradient(180deg,#152238,#101a2b);border:1px solid var(--line-soft);border-radius:12px;padding:14px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
@@ -367,30 +367,16 @@
       </div>
     </div>
     <div class="bottom">
-      <div class="panel">
+      <div class="panel" style="display:flex;flex-direction:column;min-height:0">
         <div class="section-title">Open orders</div>
-        <div class="table-wrap" style="max-height:180px;margin-bottom:20px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div>
+        <div class="table-wrap" style="flex:none;max-height:160px;margin-bottom:18px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div>
         <div class="section-title" style="border-top:1px solid var(--line-soft);padding-top:16px">Completed orders</div>
-        <div class="table-wrap" style="max-height:280px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr></tbody></table></div>
+        <div class="table-wrap" style="flex:1;min-height:200px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr></tbody></table></div>
       </div>
       <div class="panel" style="display:flex;flex-direction:column">
         <div class="section-title">GROT vs one-time entry</div>
-        <div class="advanced-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:0">
-          <div class="metric"><span>Completed scalps</span><strong id="sumTrades">0</strong></div>
-          <div class="metric"><span>Active GROT entries</span><strong id="sumActive">0</strong></div>
-          <div class="metric"><span>Last square-off</span><strong id="lastSquareRef">—</strong></div>
-          <div class="metric"><span>Next entry levels</span><strong id="nextTriggers">—</strong></div>
-          <div class="metric"><span>GROT quantity cap</span><strong id="sumQtyCap">0</strong></div>
-          <div class="metric"><span>Peak open quantity</span><strong id="sumMaxQty">0</strong></div>
-          <div class="metric"><span>Available capacity</span><strong id="sumAvailableQty">0</strong></div>
-          <div class="metric"><span>Win rate</span><strong id="sumWinRate">0%</strong></div>
-          <div class="metric" style="background:rgba(56,189,248,.1);border-color:rgba(56,189,248,.3)"><span style="color:#38bdf8">GROT gross P&L</span><strong id="sumGross" class="blue">₹0.00</strong></div>
-          <div class="metric" style="background:rgba(244,63,94,.1);border-color:rgba(244,63,94,.3)"><span style="color:#f43f5e">Costs</span><strong id="sumCosts" class="red">₹0.00</strong></div>
-          <div class="metric" style="grid-column:1/-1;background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3)"><span style="color:#22c55e">GROT total P&L</span><strong id="sumNet" class="green">₹0.00</strong></div>
-          <div class="metric"><span>One-time hold P&L</span><strong id="onePnl">₹0.00</strong></div>
-          <div class="metric" style="background:rgba(99,102,241,.15);border-color:rgba(99,102,241,.4)"><span style="color:#818cf8">GROT advantage</span><strong id="grotAdv">₹0.00</strong></div>
-        </div>
-        <div class="note" style="margin-top:auto;padding-top:16px">After every square-off, the pending ladder resets from the latest square-off price. It is not calculated from average price.</div>
+        <div class="table-wrap" style="border:none;background:transparent"><table><tbody><tr><th>Completed scalps</th><td id="sumTrades">0</td></tr><tr><th>Active GROT entries</th><td id="sumActive">0</td></tr><tr><th>Last square-off reference</th><td id="lastSquareRef">—</td></tr><tr><th>Next pending entry levels</th><td id="nextTriggers">—</td></tr><tr><th>GROT quantity cap</th><td id="sumQtyCap">0</td></tr><tr><th>Peak GROT open quantity</th><td id="sumMaxQty">0</td></tr><tr><th>Cumulative GROT bought quantity</th><td id="sumCumulativeQty">0</td></tr><tr><th>Available GROT capacity</th><td id="sumAvailableQty">0</td></tr><tr><th>Winning trades</th><td id="sumWins">0</td></tr><tr><th>Win rate</th><td id="sumWinRate">0%</td></tr><tr><th>GROT gross P&L</th><td id="sumGross" class="blue">₹0.00</td></tr><tr><th>Costs</th><td id="sumCosts" class="red">₹0.00</td></tr><tr><th>GROT total P&L</th><td id="sumNet">₹0.00</td></tr><tr><th>One-time entry</th><td id="oneEntry">—</td></tr><tr><th>One-time static quantity</th><td id="oneQty">0</td></tr><tr><th>One-time hold P&L</th><td id="onePnl">₹0.00</td></tr><tr><th>GROT advantage</th><td id="grotAdv">₹0.00</td></tr></tbody></table></div>
+        <div class="note" style="margin-top:auto">After every square-off, the pending ladder resets from the latest square-off price. It is not calculated from average price.</div>
       </div>
     </div>
     <div class="panel">
