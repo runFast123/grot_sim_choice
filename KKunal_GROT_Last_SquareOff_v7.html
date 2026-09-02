@@ -686,8 +686,13 @@
     }
   });
 
+  function offset1980ToDate(secOffset) {
+    const epoch1980 = new Date(1980, 0, 1, 0, 0, 0);
+    return new Date(epoch1980.getTime() + secOffset * 1000);
+  }
+
   function parse1980Seconds(dateVal) {
-    const epoch1980 = new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
+    const epoch1980 = new Date(1980, 0, 1, 0, 0, 0);
     let dt;
     if(dateVal instanceof Date) {
       dt = dateVal;
@@ -696,11 +701,11 @@
       if(str.includes(' ')) {
         const [dPart, tPart] = str.split(' ');
         const [y, m, d] = dPart.split('-').map(Number);
-        const [h, min, s] = tPart.split(':').map(Number);
-        dt = new Date(Date.UTC(y, m - 1, d, h || 0, min || 0, s || 0));
+        const [h, min, s] = (tPart || '00:00:00').split(':').map(Number);
+        dt = new Date(y, m - 1, d, h || 0, min || 0, s || 0);
       } else {
         const [y, m, d] = str.split('-').map(Number);
-        dt = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+        dt = new Date(y, m - 1, d, 0, 0, 0);
       }
     }
     return Math.floor((dt.getTime() - epoch1980.getTime()) / 1000);
@@ -711,14 +716,13 @@
     const chartResp = resJson.Response || {};
     const history = chartResp.lstChartHistory || [];
     const divisor = +(chartResp.PriceDivisor || 1) || 1;
-    const epoch1980 = new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
 
     const bars = [];
     for(const row of history) {
       const parts = String(row).split(',');
       if(parts.length >= 6) {
         const secOffset = +parts[0];
-        const dt = new Date(epoch1980.getTime() + secOffset * 1000);
+        const dt = offset1980ToDate(secOffset);
         bars.push({
           dt: dt,
           o: +parts[1] / divisor,
