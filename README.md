@@ -50,6 +50,30 @@ An algorithmic backtesting and replay simulator for the **GROT (Grid Order Track
 
 This project is serverless-ready for Vercel with Python runtime (`api/index.py` and `vercel.json`).
 
+### Connecting Choice OpenAPI on Vercel:
+Because Vercel serverless functions run across distributed instances, authentication is seamlessly persisted in your browser's `localStorage` and sent with every request.
+
+1. **Option A (In-Browser Login)**:
+   - Open your deployed Vercel domain (e.g. `https://your-domain.vercel.app`).
+   - Click **🔑 Login / Settings** in the top bar.
+   - Enter your **Client ID / Vendor ID**, **API Key**, and **Mobile Number**.
+   - Click **⚡ 1-Click Auto Login** or paste your daily **Session ID** and click **💾 Save Session**.
+
+2. **Option B (Vercel Environment Variables)**:
+   You can also configure default credentials in your Vercel Project Settings (`Settings` -> `Environment Variables`):
+   - `CHOICE_VENDOR_ID` (Your Choice Client ID, e.g. `M09984`)
+   - `CHOICE_API_KEY` (Your Choice Bearer API Key)
+   - `CHOICE_BASE_URL` (`https://finxomne.choiceindia.com` or `https://finx.choiceindia.com`)
+   - `CHOICE_MOBILE` (Your registered mobile number)
+
+---
+
+### Understanding Choice 401 "Static IP is blank or invalid / ClientId doesn't exists":
+This is Choice OpenAPI's gateway error message when an API request is received without a valid `VendorId` header or with an unauthenticated session. By logging in via **🔑 Login / Settings**, your `VendorId`, `Bearer`, and `SessionId` headers are automatically attached to all historical chart requests.
+
+---
+
+### Updating Your Deployment:
 Whenever you push commits to GitHub (`main` branch), Vercel automatically deploys the updated version:
 ```bash
 git add .

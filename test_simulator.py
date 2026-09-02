@@ -96,11 +96,18 @@ def test_api_endpoints():
     resp = client.get('/')
     assert resp.status_code == 200, "Root route should return 200"
     
-    # Check status route
-    resp = client.get('/api/auth/status')
+    # Check status route with direct payload
+    resp = client.post('/api/auth/status', json={"vendor_id": "TEST_USER", "session_id": "TEST_SESS"})
     assert resp.status_code == 200, "Auth status should return 200"
     data = resp.get_json()
-    assert 'logged_in' in data, "Auth status must have logged_in field"
+    assert data.get('vendor_id') == "TEST_USER", "Auth status must reflect extracted vendor_id"
+    assert data.get('has_session') is True, "Auth status must detect active session"
+
+    # Check status route with headers
+    resp = client.post('/api/auth/status', headers={"X-Vendor-Id": "HDR_USER", "X-Session-Id": "HDR_SESS"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data.get('vendor_id') == "HDR_USER", "Must extract from X-Vendor-Id header"
 
     # Check scrip search route
     resp = client.get('/api/scrip/search?query=nifty')
@@ -108,17 +115,17 @@ def test_api_endpoints():
     results = resp.get_json().get('results', [])
     assert len(results) > 0, "NIFTY should be found in default scrips"
 
-    # Check input validation
+    # Check input validation & missing auth errors
     resp = client.post('/api/auth/get_client_otp', json={})
     assert resp.status_code == 400, "Empty mobile should return 400"
 
     resp = client.post('/api/auth/validate', json={})
     assert resp.status_code == 400, "Empty OTP should return 400"
 
-    resp = client.post('/api/historical', json={})
-    assert resp.status_code == 400, "Missing token should return 400"
+    resp = client.post('/api/historical', json={"token": 26000})
+    assert resp.status_code == 401, "Historical without vendor_id/session_id should return 401 Unauthorized"
     
-    print("All Flask API endpoint tests passed!")
+    print("All Flask API endpoint and serverless auth tests passed!")
 
 if __name__ == "__main__":
     run_simulation_logic_test()

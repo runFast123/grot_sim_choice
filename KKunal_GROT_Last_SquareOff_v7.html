@@ -257,7 +257,10 @@
       <div style="text-align:center;margin:14px 0 6px;font-size:11px;color:var(--muted)">— OR Direct Session ID —</div>
       <label>Session ID (if already logged in today)</label>
       <input id="modalSessionId" type="text" placeholder="Paste active Session ID">
-      <button style="margin-top:8px;background:#102238" onclick="saveDirectAuth()">💾 Save Direct Session</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button style="background:#102238" onclick="saveDirectAuth()">💾 Save Session</button>
+        <button class="warn" style="background:#28181e;border-color:#7a2e3e" onclick="logoutChoice()">⏻ Clear Session</button>
+      </div>
     </div>
   </div>
 </div>
@@ -322,21 +325,76 @@
     $('apiFromDate').value = dateKey(start);
   });
 
-  // Check auth status with backend
-  async function checkAuthStatus() {
+  // LocalStorage Auth Persistence
+  const AUTH_STORAGE_KEY = 'grot_choice_auth_v1';
+  
+  function getStoredAuth() {
     try {
-      const res = await fetch('/api/auth/status');
+      const item = localStorage.getItem(AUTH_STORAGE_KEY);
+      return item ? JSON.parse(item) : {};
+    } catch(e) {
+      return {};
+    }
+  }
+
+  function saveStoredAuth(creds) {
+    try {
+      const existing = getStoredAuth();
+      const updated = { ...existing, ...creds };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    } catch(e) {
+      return creds;
+    }
+  }
+
+  function clearStoredAuth() {
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch(e) {}
+  }
+
+  window.logoutChoice = () => {
+    clearStoredAuth();
+    $('modalSessionId').value = '';
+    $('modalTotp').value = '';
+    $('otpBox').style.display = 'none';
+    checkAuthStatus();
+    alert('Choice session cleared from browser.');
+  };
+
+  // Check auth status with backend & localStorage
+  async function checkAuthStatus() {
+    const local = getStoredAuth();
+    if(local.vendor_id && !$('modalVendorId').value) $('modalVendorId').value = local.vendor_id;
+    if(local.mobile_no && !$('modalMobile').value) $('modalMobile').value = local.mobile_no;
+    if(local.base_url) $('modalBaseUrl').value = local.base_url;
+    if(local.session_id && !$('modalSessionId').value) $('modalSessionId').value = local.session_id;
+    if(local.api_key && !$('modalApiKey').value) $('modalApiKey').value = local.api_key;
+
+    try {
+      const res = await fetch('/api/auth/status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vendor-Id': local.vendor_id || $('modalVendorId').value.trim() || '',
+          'X-Api-Key': local.api_key || $('modalApiKey').value.trim() || '',
+          'X-Session-Id': local.session_id || $('modalSessionId').value.trim() || '',
+          'X-Base-Url': local.base_url || $('modalBaseUrl').value || ''
+        },
+        body: JSON.stringify(local)
+      });
       const data = await res.json();
-      if(data.logged_in || data.has_session) {
-        const clientLabel = data.vendor_id ? `Connected (${data.vendor_id})` : 'Connected';
+      const activeVendor = data.vendor_id || local.vendor_id;
+      const isAuthed = (data.logged_in || data.has_session) || (local.vendor_id && (local.session_id || local.api_key));
+
+      if(isAuthed && activeVendor) {
+        const clientLabel = `Connected (${activeVendor})`;
         $('choiceBadge').textContent = '⚡ Choice API: ' + clientLabel;
         $('choiceBadge').className = 'api-badge connected';
         if($('sidebarAuthStatus')) {
           $('sidebarAuthStatus').innerHTML = `<span style="color:var(--green);font-weight:700">● Choice: ${clientLabel}</span>`;
         }
-        if(data.vendor_id) $('modalVendorId').value = data.vendor_id;
-        if(data.mobile_no) $('modalMobile').value = data.mobile_no;
-        if(data.base_url) $('modalBaseUrl').value = data.base_url;
       } else {
         $('choiceBadge').textContent = '⚡ Choice API: Disconnected (Click to Login)';
         $('choiceBadge').className = 'api-badge disconnected';
@@ -345,10 +403,16 @@
         }
       }
     } catch(e) {
-      $('choiceBadge').textContent = '⚡ Choice API: Click to Configure';
-      $('choiceBadge').className = 'api-badge disconnected';
-      if($('sidebarAuthStatus')) {
-        $('sidebarAuthStatus').innerHTML = `<span style="color:var(--yellow);font-weight:700">● Choice: Click Login</span>`;
+      if(local.vendor_id && (local.session_id || local.api_key)) {
+        const clientLabel = `Connected (${local.vendor_id})`;
+        $('choiceBadge').textContent = '⚡ Choice API: ' + clientLabel;
+        $('choiceBadge').className = 'api-badge connected';
+        if($('sidebarAuthStatus')) {
+          $('sidebarAuthStatus').innerHTML = `<span style="color:var(--green);font-weight:700">● Choice: ${clientLabel}</span>`;
+        }
+      } else {
+        $('choiceBadge').textContent = '⚡ Choice API: Click to Configure';
+        $('choiceBadge').className = 'api-badge disconnected';
       }
     }
   }
@@ -374,11 +438,24 @@
     try {
       const res = await fetch('/api/auth/login_auto', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vendor-Id': vendorId,
+          'X-Api-Key': apiKey,
+          'X-Base-Url': baseUrl
+        },
         body: JSON.stringify({ mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl })
       });
       const data = await res.json();
       if(data.status === 'success') {
+        saveStoredAuth({
+          vendor_id: vendorId,
+          api_key: apiKey,
+          session_id: data.session_id,
+          access_token: data.access_token || apiKey,
+          mobile_no: mobile,
+          base_url: baseUrl
+        });
         alert(data.message || 'Choice 1-Click Login successful!');
         closeAuthModal();
         checkAuthStatus();
@@ -402,7 +479,10 @@
     const apiKey = $('modalApiKey').value.trim();
     const baseUrl = $('modalBaseUrl').value;
 
-    if(!mobile) { alert('Please enter your mobile number.'); return; }
+    if(!mobile || !vendorId || !apiKey) {
+      alert('Please enter your Client ID, API Key, and Mobile Number.');
+      return;
+    }
     
     const btn = $('getOtpBtn');
     btn.disabled = true;
@@ -411,7 +491,12 @@
     try {
       const res = await fetch('/api/auth/get_client_otp', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vendor-Id': vendorId,
+          'X-Api-Key': apiKey,
+          'X-Base-Url': baseUrl
+        },
         body: JSON.stringify({ mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl })
       });
       const data = await res.json();
@@ -420,6 +505,7 @@
         $('otpBox').style.display = 'block';
         $('otpLiveBadge').textContent = 'OTP: ' + data.otp;
         $('appStatus').textContent = `OTP received (${data.otp}) via GetClientLoginTOTP`;
+        saveStoredAuth({ mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl });
       } else {
         alert('Could not retrieve OTP: ' + (data.message || 'Unknown error'));
         $('otpBox').style.display = 'block';
@@ -441,6 +527,7 @@
     const baseUrl = $('modalBaseUrl').value;
 
     if(!otp) { alert('Please enter or fetch the OTP first.'); return; }
+    if(!vendorId || !apiKey) { alert('Please enter Client ID and API Key.'); return; }
 
     const btn = $('verifyOtpBtn');
     btn.disabled = true;
@@ -449,11 +536,24 @@
     try {
       const res = await fetch('/api/auth/validate', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vendor-Id': vendorId,
+          'X-Api-Key': apiKey,
+          'X-Base-Url': baseUrl
+        },
         body: JSON.stringify({ otp, mobile_no: mobile, vendor_id: vendorId, api_key: apiKey, base_url: baseUrl })
       });
       const data = await res.json();
       if(data.status === 'success') {
+        saveStoredAuth({
+          vendor_id: vendorId,
+          api_key: apiKey,
+          session_id: data.session_id,
+          access_token: data.access_token || apiKey,
+          mobile_no: mobile,
+          base_url: baseUrl
+        });
         alert('Authentication verified & session established!');
         closeAuthModal();
         checkAuthStatus();
@@ -471,23 +571,36 @@
 
   // Save direct session ID
   window.saveDirectAuth = async () => {
-    const vendor_id = $('modalVendorId').value.trim() || 'CHOICE_USER';
+    const vendor_id = $('modalVendorId').value.trim();
     const api_key = $('modalApiKey').value.trim();
     const session_id = $('modalSessionId').value.trim();
-    if(!session_id) { alert('Please enter your Session ID.'); return; }
-    try {
-      const res = await fetch('/api/auth/manual', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ vendor_id, api_key, session_id })
-      });
-      const data = await res.json();
-      alert('Session saved!');
-      closeAuthModal();
-      checkAuthStatus();
-    } catch(e) {
-      alert('Save error: ' + e.message);
+    const base_url = $('modalBaseUrl').value;
+    const mobile_no = $('modalMobile').value.trim();
+
+    if(!vendor_id || !session_id) {
+      alert('Please enter both Vendor / Client ID and Session ID.');
+      return;
     }
+    
+    saveStoredAuth({ vendor_id, api_key, session_id, base_url, mobile_no });
+    
+    try {
+      await fetch('/api/auth/manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vendor-Id': vendor_id,
+          'X-Api-Key': api_key,
+          'X-Session-Id': session_id,
+          'X-Base-Url': base_url
+        },
+        body: JSON.stringify({ vendor_id, api_key, session_id, base_url, mobile_no })
+      });
+    } catch(e) {}
+    
+    alert('Session credentials saved successfully!');
+    closeAuthModal();
+    checkAuthStatus();
   };
 
   // Symbol Autocomplete search
@@ -499,8 +612,14 @@
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
       const q = symbolInput.value.trim();
+      const local = getStoredAuth();
       try {
-        const res = await fetch(`/api/scrip/search?query=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/scrip/search?query=${encodeURIComponent(q)}`, {
+          headers: {
+            'X-Vendor-Id': local.vendor_id || '',
+            'X-Session-Id': local.session_id || ''
+          }
+        });
         const data = await res.json();
         if(data.results && data.results.length) {
           symbolList.innerHTML = data.results.map(r => `
@@ -538,6 +657,18 @@
 
   // Fetch historical data from Choice API
   $('fetchApiBtn').addEventListener('click', async () => {
+    const local = getStoredAuth();
+    const vendorId = local.vendor_id || $('modalVendorId').value.trim();
+    const sessionId = local.session_id || $('modalSessionId').value.trim();
+    const apiKey = local.api_key || $('modalApiKey').value.trim();
+    const baseUrl = local.base_url || $('modalBaseUrl').value;
+
+    if(!vendorId || (!sessionId && !apiKey)) {
+      openAuthModal();
+      alert('Choice OpenAPI credentials required.\n\nPlease click "⚡ 1-Click Auto Login" or enter your Client ID, API Key, and Session ID in the Login modal.');
+      return;
+    }
+
     const btn = $('fetchApiBtn');
     btn.disabled = true;
     btn.textContent = '⏳ Fetching candles from Choice API...';
@@ -548,13 +679,23 @@
       token: +$('apiToken').value,
       from_date: $('apiFromDate').value,
       to_date: $('apiToDate').value,
-      interval: $('apiResolution').value
+      interval: $('apiResolution').value,
+      vendor_id: vendorId,
+      session_id: sessionId,
+      api_key: apiKey,
+      base_url: baseUrl
     };
 
     try {
       const res = await fetch('/api/historical', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Vendor-Id': vendorId,
+          'X-Api-Key': apiKey,
+          'X-Session-Id': sessionId,
+          'X-Base-Url': baseUrl
+        },
         body: JSON.stringify(payload)
       });
       const data = await res.json();
@@ -587,7 +728,7 @@
       prepare();
 
     } catch(err) {
-      alert('Historical Data Fetch Error: ' + err.message);
+      alert('Historical Data Fetch Error:\n' + err.message);
       $('appStatus').textContent = 'API Error: ' + err.message;
     } finally {
       btn.disabled = false;

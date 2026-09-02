@@ -27,18 +27,15 @@ DEFAULT_BASE_URL = BASE_URL_OMNE
 # In-memory session store & client
 auth_state = {
     "logged_in": False,
-    "vendor_id": "",
-    "api_key": "",
-    "session_id": "",
-    "access_token": "",
-    "mobile_no": "",
-    "base_url": DEFAULT_BASE_URL,
+    "vendor_id": os.environ.get("CHOICE_VENDOR_ID", ""),
+    "api_key": os.environ.get("CHOICE_API_KEY", ""),
+    "session_id": os.environ.get("CHOICE_SESSION_ID", ""),
+    "access_token": os.environ.get("CHOICE_ACCESS_TOKEN", ""),
+    "mobile_no": os.environ.get("CHOICE_MOBILE", ""),
+    "base_url": os.environ.get("CHOICE_BASE_URL", DEFAULT_BASE_URL),
     "last_otp": "",
     "user_details": {}
 }
-
-choice_client = None
-scrip_master = None
 
 # Popular presets for quick symbol selection
 DEFAULT_SCRIPS = [
@@ -65,16 +62,101 @@ DEFAULT_SCRIPS = [
 def encode_mobile(mobile_no: str) -> str:
     return base64.b64encode(str(mobile_no).strip().encode('utf-8')).decode('utf-8')
 
-def get_headers():
+def extract_credentials(req_data=None, req_obj=None):
+    """
+    Extracts Choice credentials from multiple sources:
+    1. Request JSON payload
+    2. Request HTTP headers (X-Vendor-Id, X-Api-Key, X-Session-Id, etc.)
+    3. Environment variables (CHOICE_VENDOR_ID, CHOICE_API_KEY, etc.)
+    4. In-memory auth_state & session file fallback
+    """
+    data = req_data or {}
+    headers = req_obj.headers if req_obj else {}
+
+    vendor_id = (
+        data.get("vendor_id")
+        or headers.get("X-Vendor-Id")
+        or headers.get("VendorId")
+        or os.environ.get("CHOICE_VENDOR_ID", "")
+        or auth_state.get("vendor_id", "")
+    )
+    if vendor_id:
+        vendor_id = str(vendor_id).strip()
+
+    api_key = (
+        data.get("api_key")
+        or headers.get("X-Api-Key")
+        or headers.get("X-Bearer")
+        or headers.get("Bearer")
+        or os.environ.get("CHOICE_API_KEY", "")
+        or auth_state.get("api_key", "")
+    )
+    if api_key:
+        api_key = str(api_key).strip()
+
+    session_id = (
+        data.get("session_id")
+        or headers.get("X-Session-Id")
+        or os.environ.get("CHOICE_SESSION_ID", "")
+        or auth_state.get("session_id", "")
+    )
+    if not session_id and headers.get("Authorization"):
+        auth_hdr = headers.get("Authorization", "").strip()
+        if auth_hdr.lower().startswith("sessionid "):
+            session_id = auth_hdr[10:].strip()
+        elif auth_hdr.lower().startswith("bearer "):
+            if not api_key:
+                api_key = auth_hdr[7:].strip()
+        else:
+            session_id = auth_hdr
+    if session_id:
+        session_id = str(session_id).strip()
+
+    access_token = (
+        data.get("access_token")
+        or headers.get("X-Access-Token")
+        or auth_state.get("access_token", "")
+        or api_key
+    )
+
+    mobile_no = (
+        data.get("mobile_no")
+        or headers.get("X-Mobile-No")
+        or os.environ.get("CHOICE_MOBILE", "")
+        or auth_state.get("mobile_no", "")
+    )
+    if mobile_no:
+        mobile_no = str(mobile_no).strip()
+
+    base_url = (
+        data.get("base_url")
+        or headers.get("X-Base-Url")
+        or os.environ.get("CHOICE_BASE_URL", "")
+        or auth_state.get("base_url", DEFAULT_BASE_URL)
+    )
+    base_url = str(base_url).strip().rstrip("/") if base_url else DEFAULT_BASE_URL
+
+    return {
+        "vendor_id": vendor_id or "",
+        "api_key": api_key or "",
+        "session_id": session_id or "",
+        "access_token": access_token or "",
+        "mobile_no": mobile_no or "",
+        "base_url": base_url or DEFAULT_BASE_URL,
+        "logged_in": bool(session_id and vendor_id)
+    }
+
+def get_headers(creds=None):
+    c = creds or auth_state
     headers = {
         "Content-Type": "application/json"
     }
-    if auth_state["vendor_id"]:
-        headers["VendorId"] = auth_state["vendor_id"]
-    if auth_state["api_key"]:
-        headers["Bearer"] = auth_state["api_key"]
-    if auth_state["session_id"]:
-        headers["Authorization"] = f"SessionId {auth_state['session_id']}"
+    if c.get("vendor_id"):
+        headers["VendorId"] = c["vendor_id"]
+    if c.get("api_key"):
+        headers["Bearer"] = c["api_key"]
+    if c.get("session_id"):
+        headers["Authorization"] = f"SessionId {c['session_id']}"
     return headers
 
 def init_choice_client():
@@ -154,16 +236,18 @@ def serve_index():
 def serve_static(path):
     return send_from_directory(BASE_DIR, path)
 
-@app.route("/api/auth/status", methods=["GET"])
+@app.route("/api/auth/status", methods=["GET", "POST"])
 def auth_status():
+    data = request.get_json(silent=True) or {}
+    creds = extract_credentials(data, request)
     return jsonify({
         "status": "success",
-        "logged_in": auth_state["logged_in"],
-        "vendor_id": auth_state["vendor_id"],
-        "mobile_no": auth_state["mobile_no"],
-        "has_session": bool(auth_state["session_id"]),
-        "base_url": auth_state["base_url"],
-        "last_otp": auth_state["last_otp"]
+        "logged_in": creds["logged_in"],
+        "vendor_id": creds["vendor_id"],
+        "mobile_no": creds["mobile_no"],
+        "has_session": bool(creds["session_id"]),
+        "base_url": creds["base_url"],
+        "last_otp": auth_state.get("last_otp", "")
     })
 
 @app.route("/api/auth/get_client_otp", methods=["POST"])
@@ -173,31 +257,34 @@ def auth_get_client_otp():
     1. LoginTOTP (initiate login challenge)
     2. GetClientLoginTOTP (retrieve the actual OTP generated by Choice)
     """
-    data = request.get_json() or {}
-    mobile_no = data.get("mobile_no", "").strip() or auth_state["mobile_no"]
-    vendor_id = data.get("vendor_id", "").strip() or auth_state["vendor_id"]
-    api_key = data.get("api_key", "").strip() or auth_state["api_key"]
-    base_url = data.get("base_url", "").strip() or auth_state["base_url"] or DEFAULT_BASE_URL
+    data = request.get_json(silent=True) or {}
+    creds = extract_credentials(data, request)
+    mobile_no = creds["mobile_no"]
+    vendor_id = creds["vendor_id"]
+    api_key = creds["api_key"]
+    base_url = creds["base_url"]
 
     if not mobile_no:
         return jsonify({"status": "error", "message": "Registered mobile number is required"}), 400
+    if not vendor_id:
+        return jsonify({"status": "error", "message": "Vendor ID / Client ID is required"}), 400
+    if not api_key:
+        return jsonify({"status": "error", "message": "API Key / Bearer token is required"}), 400
 
     auth_state["mobile_no"] = mobile_no
-    if vendor_id:
-        auth_state["vendor_id"] = vendor_id
-    if api_key:
-        auth_state["api_key"] = api_key
-    auth_state["base_url"] = base_url.rstrip("/")
+    auth_state["vendor_id"] = vendor_id
+    auth_state["api_key"] = api_key
+    auth_state["base_url"] = base_url
 
     encoded_mobile = encode_mobile(mobile_no)
     headers = {
-        "VendorId": auth_state["vendor_id"],
-        "Bearer": auth_state["api_key"],
+        "VendorId": vendor_id,
+        "Bearer": api_key,
         "Content-Type": "application/json"
     }
 
     # Step 1: LoginTOTP
-    url_login = f"{auth_state['base_url']}/api/OpenAPIV1/LoginTOTP"
+    url_login = f"{base_url}/api/OpenAPIV1/LoginTOTP"
     payload = {"MobileNo": encoded_mobile}
     
     try:
@@ -207,7 +294,7 @@ def auth_get_client_otp():
         resp1_json = {"Error": str(e)}
 
     # Step 2: GetClientLoginTOTP (Fetches the generated OTP)
-    url_get_otp = f"{auth_state['base_url']}/api/OpenAPIV1/GetClientLoginTOTP"
+    url_get_otp = f"{base_url}/api/OpenAPIV1/GetClientLoginTOTP"
     try:
         resp2 = requests.post(url_get_otp, json=payload, headers=headers, timeout=15)
         if resp2.status_code == 200:
@@ -219,6 +306,8 @@ def auth_get_client_otp():
                     "status": "success",
                     "otp": str(otp),
                     "message": f"OTP successfully retrieved via GetClientLoginTOTP: {otp}",
+                    "vendor_id": vendor_id,
+                    "mobile_no": mobile_no,
                     "raw_login": resp1_json,
                     "raw_otp": resp2_json
                 })
@@ -244,34 +333,35 @@ def auth_validate():
     """
     Executes ValidateTOTP to verify OTP and obtain SessionId and AccessToken
     """
-    data = request.get_json() or {}
-    otp = data.get("otp", "").strip() or data.get("totp", "").strip() or auth_state["last_otp"]
-    mobile_no = data.get("mobile_no", "").strip() or auth_state["mobile_no"]
-    vendor_id = data.get("vendor_id", "").strip() or auth_state["vendor_id"]
-    api_key = data.get("api_key", "").strip() or auth_state["api_key"]
-    base_url = data.get("base_url", "").strip() or auth_state["base_url"] or DEFAULT_BASE_URL
+    data = request.get_json(silent=True) or {}
+    creds = extract_credentials(data, request)
+    otp = data.get("otp", "").strip() or data.get("totp", "").strip() or auth_state.get("last_otp", "")
+    mobile_no = creds["mobile_no"]
+    vendor_id = creds["vendor_id"]
+    api_key = creds["api_key"]
+    base_url = creds["base_url"]
 
     if not otp:
         return jsonify({"status": "error", "message": "OTP code is required"}), 400
     if not mobile_no:
         return jsonify({"status": "error", "message": "Mobile number is required"}), 400
+    if not vendor_id or not api_key:
+        return jsonify({"status": "error", "message": "Vendor ID and API Key are required"}), 400
 
     encoded_mobile = encode_mobile(mobile_no)
     auth_state["mobile_no"] = mobile_no
-    if vendor_id:
-        auth_state["vendor_id"] = vendor_id
-    if api_key:
-        auth_state["api_key"] = api_key
-    auth_state["base_url"] = base_url.rstrip("/")
+    auth_state["vendor_id"] = vendor_id
+    auth_state["api_key"] = api_key
+    auth_state["base_url"] = base_url
 
-    url_validate = f"{auth_state['base_url']}/api/OpenAPIV1/ValidateTOTP"
+    url_validate = f"{base_url}/api/OpenAPIV1/ValidateTOTP"
     payload = {
         "MobileNo": encoded_mobile,
         "OTP": str(otp)
     }
     headers = {
-        "VendorId": auth_state["vendor_id"],
-        "Bearer": auth_state["api_key"],
+        "VendorId": vendor_id,
+        "Bearer": api_key,
         "Content-Type": "application/json"
     }
 
@@ -283,13 +373,13 @@ def auth_validate():
                 res_data = resp_json.get("Response", {})
                 if isinstance(res_data, str):
                     session_id = res_data
-                    access_token = auth_state["api_key"]
+                    access_token = api_key
                 elif isinstance(res_data, dict):
                     session_id = res_data.get("SessionId") or res_data.get("session_id")
-                    access_token = res_data.get("AccessToken") or auth_state["api_key"]
+                    access_token = res_data.get("AccessToken") or api_key
                 else:
                     session_id = f"sess_{int(datetime.datetime.now().timestamp())}"
-                    access_token = auth_state["api_key"]
+                    access_token = api_key
 
                 auth_state["session_id"] = str(session_id)
                 auth_state["access_token"] = str(access_token)
@@ -302,7 +392,12 @@ def auth_validate():
                 return jsonify({
                     "status": "success",
                     "message": "Choice 2FA authentication verified successfully!",
-                    "session_id": auth_state["session_id"],
+                    "session_id": str(session_id),
+                    "access_token": str(access_token),
+                    "vendor_id": vendor_id,
+                    "api_key": api_key,
+                    "mobile_no": mobile_no,
+                    "base_url": base_url,
                     "logged_in": True,
                     "data": resp_json
                 })
@@ -331,11 +426,12 @@ def auth_login_auto():
     2. GetClientLoginTOTP (retrieve OTP)
     3. ValidateTOTP (exchange OTP for SessionId)
     """
-    data = request.get_json() or {}
-    mobile_no = data.get("mobile_no", "").strip() or auth_state["mobile_no"]
-    vendor_id = data.get("vendor_id", "").strip() or auth_state["vendor_id"]
-    api_key = data.get("api_key", "").strip() or auth_state["api_key"]
-    base_url = data.get("base_url", "").strip() or auth_state["base_url"] or DEFAULT_BASE_URL
+    data = request.get_json(silent=True) or {}
+    creds = extract_credentials(data, request)
+    mobile_no = creds["mobile_no"]
+    vendor_id = creds["vendor_id"]
+    api_key = creds["api_key"]
+    base_url = creds["base_url"]
 
     if not mobile_no or not vendor_id or not api_key:
         return jsonify({"status": "error", "message": "Mobile number, Vendor ID, and API Key are all required"}), 400
@@ -343,16 +439,16 @@ def auth_login_auto():
     auth_state["mobile_no"] = mobile_no
     auth_state["vendor_id"] = vendor_id
     auth_state["api_key"] = api_key
-    auth_state["base_url"] = base_url.rstrip("/")
+    auth_state["base_url"] = base_url
 
     # Use ChoiceClient if available
     if HAS_CHOICE_PKG:
         try:
-            client = ChoiceClient(vendor_id=vendor_id, api_key=api_key, base_url=auth_state["base_url"])
+            client = ChoiceClient(vendor_id=vendor_id, api_key=api_key, base_url=base_url)
             sess_id = client.login(mobile_no)
             
-            auth_state["session_id"] = client.session_id
-            auth_state["access_token"] = client.access_token or api_key
+            auth_state["session_id"] = str(client.session_id)
+            auth_state["access_token"] = str(client.access_token or api_key)
             auth_state["logged_in"] = True
             
             global choice_client
@@ -362,10 +458,15 @@ def auth_login_auto():
             return jsonify({
                 "status": "success",
                 "message": f"Choice 1-Click Login successful! SessionId: {sess_id[:10]}...",
-                "session_id": sess_id,
+                "session_id": str(sess_id),
+                "access_token": auth_state["access_token"],
+                "vendor_id": vendor_id,
+                "api_key": api_key,
+                "mobile_no": mobile_no,
+                "base_url": base_url,
                 "logged_in": True
             })
-        except Exception as e:
+        except Exception:
             pass # Fallback to manual requests below
 
     # Fallback to direct requests
@@ -374,16 +475,16 @@ def auth_login_auto():
     
     try:
         # Step 1: LoginTOTP
-        r1 = requests.post(f"{auth_state['base_url']}/api/OpenAPIV1/LoginTOTP", json={"MobileNo": encoded_mobile}, headers=headers, timeout=15)
+        requests.post(f"{base_url}/api/OpenAPIV1/LoginTOTP", json={"MobileNo": encoded_mobile}, headers=headers, timeout=15)
         # Step 2: GetClientLoginTOTP
-        r2 = requests.post(f"{auth_state['base_url']}/api/OpenAPIV1/GetClientLoginTOTP", json={"MobileNo": encoded_mobile}, headers=headers, timeout=15)
+        r2 = requests.post(f"{base_url}/api/OpenAPIV1/GetClientLoginTOTP", json={"MobileNo": encoded_mobile}, headers=headers, timeout=15)
         r2_data = r2.json() if r2.status_code == 200 else {}
         otp = r2_data.get("Response")
         if not otp:
-            return jsonify({"status": "error", "message": f"Could not get OTP: {r2_data.get('Message') or r2.text}"}), 400
+            return jsonify({"status": "error", "message": f"Could not get OTP from Choice: {r2_data.get('Message') or r2.text}"}), 400
 
         # Step 3: ValidateTOTP
-        r3 = requests.post(f"{auth_state['base_url']}/api/OpenAPIV1/ValidateTOTP", json={"MobileNo": encoded_mobile, "OTP": str(otp)}, headers=headers, timeout=15)
+        r3 = requests.post(f"{base_url}/api/OpenAPIV1/ValidateTOTP", json={"MobileNo": encoded_mobile, "OTP": str(otp)}, headers=headers, timeout=15)
         r3_data = r3.json() if r3.status_code == 200 else {}
         
         res_data = r3_data.get("Response", {})
@@ -391,8 +492,10 @@ def auth_login_auto():
         if not session_id:
             return jsonify({"status": "error", "message": f"ValidateTOTP failed: {r3_data.get('Message') or r3.text}"}), 400
 
+        access_token = res_data.get("AccessToken", api_key) if isinstance(res_data, dict) else api_key
+
         auth_state["session_id"] = str(session_id)
-        auth_state["access_token"] = res_data.get("AccessToken", api_key) if isinstance(res_data, dict) else api_key
+        auth_state["access_token"] = str(access_token)
         auth_state["logged_in"] = True
         auth_state["last_otp"] = str(otp)
 
@@ -402,7 +505,12 @@ def auth_login_auto():
         return jsonify({
             "status": "success",
             "message": f"Choice 1-Click Login successful! (OTP: {otp})",
-            "session_id": auth_state["session_id"],
+            "session_id": str(session_id),
+            "access_token": str(access_token),
+            "vendor_id": vendor_id,
+            "api_key": api_key,
+            "mobile_no": mobile_no,
+            "base_url": base_url,
             "logged_in": True
         })
     except Exception as e:
@@ -411,10 +519,12 @@ def auth_login_auto():
 @app.route("/api/auth/manual", methods=["POST"])
 def auth_manual():
     """Directly configure VendorId, ApiKey and SessionId"""
-    data = request.get_json() or {}
-    vendor_id = data.get("vendor_id", "").strip() or auth_state["vendor_id"]
-    api_key = data.get("api_key", "").strip() or auth_state["api_key"]
-    session_id = data.get("session_id", "").strip()
+    data = request.get_json(silent=True) or {}
+    creds = extract_credentials(data, request)
+    vendor_id = creds["vendor_id"]
+    api_key = creds["api_key"]
+    session_id = creds["session_id"]
+    base_url = creds["base_url"]
     
     if not vendor_id or not session_id:
         return jsonify({"status": "error", "message": "VendorId and SessionId are required"}), 400
@@ -422,6 +532,7 @@ def auth_manual():
     auth_state["vendor_id"] = vendor_id
     auth_state["api_key"] = api_key
     auth_state["session_id"] = session_id
+    auth_state["base_url"] = base_url
     auth_state["logged_in"] = True
     
     init_choice_client()
@@ -430,6 +541,10 @@ def auth_manual():
     return jsonify({
         "status": "success",
         "message": "Session credentials saved successfully.",
+        "vendor_id": vendor_id,
+        "api_key": api_key,
+        "session_id": session_id,
+        "base_url": base_url,
         "logged_in": True
     })
 
@@ -493,7 +608,8 @@ def get_historical_candles():
     Fetch historical candlestick data from Choice OpenAPI /api/OpenGraph/ChartData
     Standardizes output to [{ dt: 'YYYY-MM-DD HH:MM:SS', o, h, l, c, v }]
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
+    creds = extract_credentials(data, request)
     segment_id = int(data.get("segment_id", 1))
     token = data.get("token")
     from_date = data.get("from_date", "").strip()
@@ -503,10 +619,32 @@ def get_historical_candles():
     if not token:
         return jsonify({"status": "error", "message": "Scrip token is required"}), 400
 
-    # If ChoiceClient SDK instance is active with valid session
-    if HAS_CHOICE_PKG and choice_client and choice_client.session_id:
+    if not creds.get("vendor_id"):
+        return jsonify({
+            "status": "error",
+            "message": "Choice Client ID / Vendor ID is missing. Please click '🔑 Login / Settings' in the top bar to log in or enter your Choice credentials."
+        }), 401
+
+    if not creds.get("session_id") and not creds.get("api_key"):
+        return jsonify({
+            "status": "error",
+            "message": "Active Choice Session ID is missing. Please click '🔑 Login / Settings' to authenticate or paste your active Session ID."
+        }), 401
+
+    # If ChoiceClient SDK instance can be initialized
+    if HAS_CHOICE_PKG and creds.get("vendor_id") and creds.get("api_key"):
         try:
-            df = choice_client.historical.get_historical_data(
+            client = ChoiceClient(
+                vendor_id=creds["vendor_id"],
+                api_key=creds["api_key"],
+                base_url=creds["base_url"]
+            )
+            if creds.get("session_id"):
+                client.session_id = creds["session_id"]
+            if creds.get("access_token"):
+                client.access_token = creds["access_token"]
+            
+            df = client.historical.get_historical_data(
                 segment_id=segment_id,
                 token=int(token),
                 from_date=from_date,
@@ -538,7 +676,7 @@ def get_historical_candles():
     from_sec = parse_date_to_1980_seconds(from_date)
     to_sec = parse_date_to_1980_seconds(to_date)
 
-    url = f"{auth_state['base_url']}/api/OpenGraph/ChartData"
+    url = f"{creds['base_url']}/api/OpenGraph/ChartData"
     payload = {
         "SegmentId": segment_id,
         "Token": int(token),
@@ -548,7 +686,7 @@ def get_historical_candles():
     }
 
     try:
-        resp = requests.post(url, json=payload, headers=get_headers(), timeout=30)
+        resp = requests.post(url, json=payload, headers=get_headers(creds), timeout=30)
         if resp.status_code == 200:
             res_json = resp.json()
             if res_json.get("Status") == "Success":
@@ -590,6 +728,11 @@ def get_historical_candles():
                     "message": f"Choice API Error: {res_json.get('Message') or res_json}",
                     "raw": res_json
                 }), 400
+        elif resp.status_code == 401:
+            return jsonify({
+                "status": "error",
+                "message": f"Choice API 401 Unauthorized: {resp.text}. Please re-verify your Client ID, API Key, and Session ID in 🔑 Login / Settings."
+            }), 401
         else:
             return jsonify({
                 "status": "error",
