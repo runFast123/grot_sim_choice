@@ -546,6 +546,8 @@
   window.$ = $;
   let allBars=[], sessionBars=[], dates=[], idx=0, timer=null, positions=[], pendingLevels=[], trades=[], prepared=false, strategyStopped=false, tradingPaused=false, sessionStartRealised=0, anchorPrice=0, benchmarkAnchor=0, lastSquareOffPrice=NaN, maxQtyUsed=0, cumulativeEntryQty=0, equityHistory=[], grotPeak=0, onePeak=0, maxGrotDD=0, maxOneDD=0, worstGrot=0, worstOne=0, peakCapital=0;
   let activeTab = 'choice';
+  let activeSymbol = 'NIFTY';
+  let activeSymbol = 'NIFTY';
 
   const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   const money = n => '₹'+fmt(n);
@@ -1230,92 +1232,276 @@
   $('startTime').addEventListener('change', () => { if(prepared) prepare(); });
   $('endTime').addEventListener('change', () => { if(prepared) prepare(); });
 
-  function config(){const perQty=Math.max(1,Math.floor(+$('perTradeQty').value)),maxLots=Math.max(1,Math.floor(+$('maxOpenLots').value));return{selection:$('selectionMode').value,dir:$('direction').value,start:$('startTime').value,end:$('endTime').value,source:$('priceSource').value,startPrice:Math.max(0,+$('startPrice').value),step:Math.max(.01,+$('gridStep').value),square:Math.max(.01,+$('squarePoints').value),perQty,maxLots,totalQty:perQty*maxLots,maxP:Math.max(0,+$('maxProfit').value),maxL:Math.max(0,+$('maxLoss').value),cost:Math.max(0,+$('costs').value)}}
-  function updateQtyHint(){const perQty=Math.max(1,Math.floor(+$('perTradeQty').value)),maxLots=Math.max(1,Math.floor(+$('maxOpenLots').value));$('qtyHint').textContent=`Maximum open quantity: ${perQty} × ${maxLots} = ${(perQty*maxLots).toLocaleString('en-IN')}`;}
-  $('perTradeQty').addEventListener('input',updateQtyHint);$('maxOpenLots').addEventListener('input',updateQtyHint);updateQtyHint();
+  function config(){
+    const perQty = Math.max(1, Math.floor(+$('perTradeQty').value));
+    const maxLots = Math.max(1, Math.floor(+$('maxOpenLots').value));
+    return {
+      selection: $('selectionMode').value,
+      dir: $('direction').value,
+      start: $('startTime').value,
+      end: $('endTime').value,
+      source: $('priceSource').value,
+      startPrice: Math.max(0, +$('startPrice').value),
+      step: Math.max(0.01, +$('gridStep').value),
+      square: Math.max(0.01, +$('squarePoints').value),
+      perQty,
+      maxLots,
+      totalQty: perQty * maxLots,
+      maxP: Math.max(0, +$('maxProfit').value),
+      maxL: Math.max(0, +$('maxLoss').value),
+      cost: Math.max(0, +$('costs').value),
+      costModel: $('costModel') ? $('costModel').value : 'fo_futures',
+      brokerageRate: $('brokerageRate') ? Math.max(0, +$('brokerageRate').value) : 20
+    };
+  }
+
+  function updateCostUI(){
+    const m = $('costModel') ? $('costModel').value : 'fo_futures';
+    const hint = $('costHint');
+    if (!hint) return;
+    if (m === 'fo_futures') hint.textContent = 'Indian F&O Futures: ₹20/ord + STT 0.02% (sell) + Txn 0.00173% + GST 18% + Stamp 0.002%';
+    else if (m === 'fo_options') hint.textContent = 'Indian F&O Options: ₹20/ord + STT 0.1% (sell premium) + Txn 0.035% + GST 18% + Stamp 0.003%';
+    else if (m === 'cash_intra') hint.textContent = 'NSE Cash Intraday: ₹20/ord max + STT 0.025% (sell) + Txn 0.00297% + GST 18% + Stamp 0.003%';
+    else if (m === 'flat_custom') hint.textContent = 'Custom fixed ₹ amount deducted per round-trip completed trade.';
+    else if (m === 'zero') hint.textContent = 'Zero brokerage and zero statutory taxes (Gross = Net).';
+  }
+  if ($('costModel')) $('costModel').addEventListener('change', () => { updateCostUI(); if(prepared) prepare(); });
+  if ($('brokerageRate')) $('brokerageRate').addEventListener('input', () => { if(prepared) prepare(); });
+  if ($('costs')) $('costs').addEventListener('input', () => { if(prepared) prepare(); });
+  updateCostUI();
+
+  function calculateTradeCost(side, entry, exit, qty, c){
+    const model = c.costModel || 'fo_futures';
+    if (model === 'zero') return 0;
+    if (model === 'flat_custom') return Math.max(0, c.cost || 0);
+
+    const buyPrice = side === 'buy' ? entry : exit;
+    const sellPrice = side === 'buy' ? exit : entry;
+    const turnoverBuy = buyPrice * qty;
+    const turnoverSell = sellPrice * qty;
+    const totalTurnover = turnoverBuy + turnoverSell;
+
+    const baseBrok = Math.max(0, c.brokerageRate ?? 20);
+    const brokerageBuy = model === 'cash_intra' ? Math.min(baseBrok, turnoverBuy * 0.0003) : baseBrok;
+    const brokerageSell = model === 'cash_intra' ? Math.min(baseBrok, turnoverSell * 0.0003) : baseBrok;
+    const brokerage = brokerageBuy + brokerageSell;
+
+    let stt = 0;
+    if (model === 'fo_futures') stt = turnoverSell * 0.0002;
+    else if (model === 'fo_options') stt = turnoverSell * 0.001;
+    else if (model === 'cash_intra') stt = turnoverSell * 0.00025;
+
+    let txn = 0;
+    if (model === 'fo_futures') txn = totalTurnover * 0.0000173;
+    else if (model === 'fo_options') txn = totalTurnover * 0.00035;
+    else if (model === 'cash_intra') txn = totalTurnover * 0.0000297;
+
+    const sebi = totalTurnover * 0.000001;
+    const gst = (brokerage + txn + sebi) * 0.18;
+
+    let stamp = 0;
+    if (model === 'fo_futures') stamp = turnoverBuy * 0.00002;
+    else if (model === 'fo_options' || model === 'cash_intra') stamp = turnoverBuy * 0.00003;
+
+    const total = brokerage + stt + txn + sebi + gst + stamp;
+    return Number(total.toFixed(2));
+  }
+
+  function updateQtyHint(){
+    const perQty = Math.max(1, Math.floor(+$('perTradeQty').value));
+    const maxLots = Math.max(1, Math.floor(+$('maxOpenLots').value));
+    const el = $('qtyHint');
+    if (el) el.textContent = `Maximum open quantity: ${perQty} × ${maxLots} = ${(perQty*maxLots).toLocaleString('en-IN')}`;
+  }
+  if ($('perTradeQty')) $('perTradeQty').addEventListener('input', updateQtyHint);
+  if ($('maxOpenLots')) $('maxOpenLots').addEventListener('input', updateQtyHint);
+  updateQtyHint();
   
-  function levelKey(level){return Number(level.toFixed(8));}
-  function queueLevel(level){const key=levelKey(level);if(!pendingLevels.some(x=>levelKey(x)===key)&&!positions.some(p=>levelKey(p.entry)===key))pendingLevels.push(level);}
-  function resetLadder(){pendingLevels=[];queueLevel(anchorPrice);}
-  
+  function levelKey(level){ return Number(level.toFixed(8)); }
+  function queueLevel(level){
+    const key = levelKey(level);
+    if (!pendingLevels.some(x => levelKey(x) === key) && !positions.some(p => levelKey(p.entry) === key)) {
+      pendingLevels.push(level);
+    }
+  }
+  function resetLadder(){ pendingLevels = []; queueLevel(anchorPrice); }
+
+  function setPauseTradeUI(paused){
+    tradingPaused = paused;
+    const btns = [$('topPauseTradeBtn'), $('pauseTradeBtn')];
+    btns.forEach(btn => {
+      if (!btn) return;
+      if (tradingPaused) {
+        btn.textContent = '▶ Resume Trade';
+        btn.title = 'Trading is PAUSED (replay continues). Click to resume new trade entries.';
+        btn.style.background = 'rgba(245,158,11,0.22)';
+        btn.style.color = 'var(--yellow)';
+        btn.style.borderColor = 'var(--yellow)';
+      } else {
+        btn.textContent = 'Pause Trade';
+        btn.title = 'Pause new trades while keeping chart replay running';
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.style.borderColor = '';
+      }
+    });
+  }
+
+  function togglePauseTrade(){
+    if (!prepared) return;
+    setPauseTradeUI(!tradingPaused);
+    if (tradingPaused) {
+      $('appStatus').textContent = 'Trading PAUSED · Replay continues without taking new entries';
+    } else {
+      $('appStatus').textContent = 'Trading RESUMED · Active scalping ladder enabled';
+    }
+  }
+  window.togglePauseTrade = togglePauseTrade;
+
   function prepare(){
     stop();
-    if(!allBars.length){
+    if (!allBars.length) {
       showEmpty();
       setReplayHint('Fetch candles first. Prepare and Play unlock after data loads.', false);
       return;
     }
-    const c=config(), day=$('tradeDate').value || (dates.length ? dates.at(-1) : '');
+    const c = config(), day = $('tradeDate').value || (dates.length ? dates.at(-1) : '');
     
-    sessionBars=allBars.filter(b=>{
-      const d=dateKey(b.dt),t=timeKey(b.dt);
-      if(c.selection==='date')return d>=day;
-      if(c.selection==='time')return t>=c.start&&t<=c.end;
-      return d===day&&t>=c.start&&t<=c.end;
+    sessionBars = allBars.filter(b => {
+      const d = dateKey(b.dt), t = timeKey(b.dt);
+      if (c.selection === 'date') return d >= day;
+      if (c.selection === 'time') return t >= c.start && t <= c.end;
+      return d === day && t >= c.start && t <= c.end;
     });
 
-    // Fallback if strict time window filtered everything on that day
-    if(!sessionBars.length && c.selection==='both' && day){
-      sessionBars=allBars.filter(b=>dateKey(b.dt)===day);
+    if (!sessionBars.length && c.selection === 'both' && day) {
+      sessionBars = allBars.filter(b => dateKey(b.dt) === day);
     }
-    if(!sessionBars.length && allBars.length){
-      sessionBars=allBars.slice(-100);
+    if (!sessionBars.length && allBars.length) {
+      sessionBars = allBars.slice(-100);
     }
 
-    if(!sessionBars.length){
+    if (!sessionBars.length) {
       showEmpty('No candles for this date/time');
       setReplayHint('No candles in this date/time window. Adjust the replay window.', false);
       return;
     }
 
-    idx=0;
-    positions=[];
-    pendingLevels=[];
-    trades=[];
-    strategyStopped=false;
-    sessionStartRealised=0;
-    lastSquareOffPrice=NaN;
-    maxQtyUsed=0;
-    cumulativeEntryQty=0;
-    equityHistory=[];
-    grotPeak=0;
-    onePeak=0;
-    maxGrotDD=0;
-    maxOneDD=0;
-    worstGrot=0;
-    worstOne=0;
-    peakCapital=0;
+    idx = 0;
+    positions = [];
+    pendingLevels = [];
+    trades = [];
+    strategyStopped = false;
+    sessionStartRealised = 0;
+    lastSquareOffPrice = NaN;
+    maxQtyUsed = 0;
+    cumulativeEntryQty = 0;
+    equityHistory = [];
+    grotPeak = 0;
+    onePeak = 0;
+    maxGrotDD = 0;
+    maxOneDD = 0;
+    worstGrot = 0;
+    worstOne = 0;
+    peakCapital = 0;
     
-    anchorPrice = (c.source==='market' || c.startPrice<=0) ? sessionBars[0].c : c.startPrice;
+    anchorPrice = (c.source === 'market' || c.startPrice <= 0) ? sessionBars[0].c : c.startPrice;
     benchmarkAnchor = anchorPrice;
     resetLadder();
-    prepared=true;
+    prepared = true;
+    setPauseTradeUI(false);
 
-    ['playBtn','pauseBtn','nextBtn','resetBtn','prepareBtn','topPlayBtn','topPauseBtn','topNextBtn','topResetBtn','topPrepareBtn'].forEach(id=>{
-      if($(id)) $(id).disabled=false;
+    ['playBtn','pauseBtn','nextBtn','resetBtn','prepareBtn','pauseTradeBtn','topPlayBtn','topPauseBtn','topNextBtn','topResetBtn','topPrepareBtn','topPauseTradeBtn'].forEach(id => {
+      if ($(id)) $(id).disabled = false;
     });
 
-    $('empty').style.display='none';
-    $('appStatus').textContent=`Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
+    const emptyEl = $('empty');
+    if (emptyEl) emptyEl.style.display = 'none';
+    
+    $('appStatus').textContent = `Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
     setReplayHint(`Ready · ${sessionBars.length} bars. Press Play or step +1 Bar.`, true);
     updateFlow();
     update();
   }
+
   function highest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=-Infinity;for(let i=start;i<=end;i++)x=Math.max(x,a[i][k]);return end-start+1>=len?x:NaN;}
   function lowest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=Infinity;for(let i=start;i<=end;i++)x=Math.min(x,a[i][k]);return end-start+1>=len?x:NaN;}
   function calcRSI(a,i,len){if(i<len)return NaN;let g=0,l=0;for(let j=i-len+1;j<=i;j++){let d=a[j].c-a[j-1].c;if(d>0)g+=d;else l-=d;}if(l===0)return 100;return 100-(100/(1+(g/len)/(l/len)));}
   function netQty(){return positions.reduce((s,p)=>s+p.qty,0);}
   function avgPrice(){const q=netQty();return q?positions.reduce((s,p)=>s+p.entry*p.qty,0)/q:NaN;}
   function openPnl(price){return positions.reduce((s,p)=>s+(price-p.entry)*(p.side==='buy'?1:-1)*p.qty,0);}
-  function addEntry(level,b,c){const room=c.totalQty-netQty(),qty=c.perQty;if(room<qty||positions.some(p=>levelKey(p.entry)===levelKey(level)))return false;positions.push({side:c.dir,entry:level,entryTime:b.dt,qty,level});cumulativeEntryQty+=qty;maxQtyUsed=Math.max(maxQtyUsed,netQty());queueLevel(c.dir==='buy'?level-c.step:level+c.step);$('appStatus').textContent=`${c.dir==='buy'?'BUY':'SHORT'} ${qty} @ ${fmt(level)}`;return true;}
-  function closeOne(p,price,b,reason,c){const gross=(price-p.entry)*(p.side==='buy'?1:-1)*p.qty,net=gross-c.cost;trades.push({...p,exit:price,exitTime:b.dt,gross,net,reason});positions=positions.filter(x=>x!==p);}
+  
+  function addEntry(level,b,c){
+    const room=c.totalQty-netQty(),qty=c.perQty;
+    if(room<qty||positions.some(p=>levelKey(p.entry)===levelKey(level)))return false;
+    positions.push({side:c.dir,entry:level,entryTime:b.dt,qty,level});
+    cumulativeEntryQty+=qty;
+    maxQtyUsed=Math.max(maxQtyUsed,netQty());
+    queueLevel(c.dir==='buy'?level-c.step:level+c.step);
+    $('appStatus').textContent=`${c.dir==='buy'?'BUY':'SHORT'} ${qty} @ ${fmt(level)}`;
+    return true;
+  }
+
+  function closeOne(p,price,b,reason,c){
+    const gross=(price-p.entry)*(p.side==='buy'?1:-1)*p.qty;
+    const costVal=calculateTradeCost(p.side,p.entry,price,p.qty,c);
+    const net=gross-costVal;
+    trades.push({...p,exit:price,exitTime:b.dt,gross,net,cost:costVal,reason});
+    positions=positions.filter(x=>x!==p);
+  }
+
   function closeAll(b,reason,c){for(const p of [...positions])closeOne(p,b.c,b,reason,c);$('appStatus').textContent=`${reason} · All positions closed`;}
   function realisedNet(){return trades.reduce((s,t)=>s+t.net,0);}
   function currentCapital(){return positions.reduce((s,p)=>s+p.entry*p.qty,0);}
   function oneTimePnl(price,c){return(price-benchmarkAnchor)*(c.dir==='buy'?1:-1)*c.totalQty;}
-  function recordMetrics(b,c){const grot=realisedNet()+openPnl(b.c),one=oneTimePnl(b.c,c);grotPeak=Math.max(grotPeak,grot);onePeak=Math.max(onePeak,one);maxGrotDD=Math.max(maxGrotDD,grotPeak-grot);maxOneDD=Math.max(maxOneDD,onePeak-one);worstGrot=Math.min(worstGrot,grot);worstOne=Math.min(worstOne,one);peakCapital=Math.max(peakCapital,currentCapital());equityHistory.push({dt:b.dt,grot,one});}
-  function processTargets(b,c){const blocked=new Set();let latestTarget=NaN;for(const p of [...positions]){const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;const hit=p.side==='buy'?b.h>=target:b.l<=target;if(hit){latestTarget=target;closeOne(p,target,b,'STEP SQUARE-OFF',c);}}if(Number.isFinite(latestTarget)){lastSquareOffPrice=latestTarget;pendingLevels=[];let chase=c.dir==='buy'?latestTarget-c.step:latestTarget+c.step;while(positions.some(p=>levelKey(p.entry)===levelKey(chase)))chase=c.dir==='buy'?chase-c.step:chase+c.step;blocked.add(levelKey(chase));queueLevel(chase);$('appStatus').textContent=`SQUARE-OFF ${fmt(latestTarget)} · NEXT ${c.dir==='buy'?'BUY':'SHORT'} ${fmt(chase)}`;}return blocked;}
-  function processEntries(b,c,blocked){let safety=0;while(netQty()+c.perQty<=c.totalQty&&safety++<c.maxLots*3){pendingLevels=pendingLevels.filter(level=>!positions.some(p=>levelKey(p.entry)===levelKey(level)));pendingLevels.sort((a,z)=>c.dir==='buy'?z-a:a-z);const i=pendingLevels.findIndex(level=>!blocked.has(levelKey(level))&&(c.dir==='buy'?b.l<=level:b.h>=level));if(i<0)break;const level=pendingLevels.splice(i,1)[0];if(!addEntry(level,b,c))break;}}
+  
+  function recordMetrics(b,c){
+    const grot=realisedNet()+openPnl(b.c),one=oneTimePnl(b.c,c);
+    grotPeak=Math.max(grotPeak,grot);
+    onePeak=Math.max(onePeak,one);
+    maxGrotDD=Math.max(maxGrotDD,grotPeak-grot);
+    maxOneDD=Math.max(maxOneDD,onePeak-one);
+    worstGrot=Math.min(worstGrot,grot);
+    worstOne=Math.min(worstOne,one);
+    peakCapital=Math.max(peakCapital,currentCapital());
+    equityHistory.push({dt:b.dt,grot,one});
+  }
+
+  function processTargets(b,c){
+    const blocked=new Set();
+    let latestTarget=NaN;
+    for(const p of [...positions]){
+      const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;
+      const hit=p.side==='buy'?b.h>=target:b.l<=target;
+      if(hit){
+        latestTarget=target;
+        closeOne(p,target,b,'STEP SQUARE-OFF',c);
+      }
+    }
+    if(Number.isFinite(latestTarget)){
+      lastSquareOffPrice=latestTarget;
+      pendingLevels=[];
+      let chase=c.dir==='buy'?latestTarget-c.step:latestTarget+c.step;
+      while(positions.some(p=>levelKey(p.entry)===levelKey(chase)))chase=c.dir==='buy'?chase-c.step:chase+c.step;
+      blocked.add(levelKey(chase));
+      queueLevel(chase);
+      $('appStatus').textContent=`SQUARE-OFF ${fmt(latestTarget)} · NEXT ${c.dir==='buy'?'BUY':'SHORT'} ${fmt(chase)}`;
+    }
+    return blocked;
+  }
+
+  function processEntries(b,c,blocked){
+    let safety=0;
+    while(netQty()+c.perQty<=c.totalQty&&safety++<c.maxLots*3){
+      pendingLevels=pendingLevels.filter(level=>!positions.some(p=>levelKey(p.entry)===levelKey(level)));
+      pendingLevels.sort((a,z)=>c.dir==='buy'?z-a:a-z);
+      const i=pendingLevels.findIndex(level=>!blocked.has(levelKey(level))&&(c.dir==='buy'?b.l<=level:b.h>=level));
+      if(i<0)break;
+      const level=pendingLevels.splice(i,1)[0];
+      if(!addEntry(level,b,c))break;
+    }
+  }
+
   function step(){
     if(!prepared||idx>=sessionBars.length){stop();return;}
     const c=config(),b=sessionBars[idx],newDay=idx===0||dateKey(sessionBars[idx-1].dt)!==dateKey(b.dt);
@@ -1346,7 +1532,7 @@
     
     if(lastBar||intradayDayEnd||selectedTimeEnd){
       if(positions.length)closeAll(b,lastBar?'FINAL EXIT':'TIME EXIT',c);
-    }else if(!strategyStopped){
+    }else if(!strategyStopped && !tradingPaused){
       processEntries(b,c,blocked);
     }
     recordMetrics(b,c);
@@ -1385,53 +1571,570 @@
   window.pauseReplay = () => { stop(); $('appStatus').textContent='Replay paused'; };
   window.stepReplay = () => { stop(); if(!prepared) prepare(); step(); };
 
-  $('prepareBtn').onclick=prepare;
-  $('playBtn').onclick=play;
-  $('pauseBtn').onclick=window.pauseReplay;
-  $('nextBtn').onclick=window.stepReplay;
-  $('resetBtn').onclick=prepare;
-  $('topSpeed').addEventListener('change', () => {
+  if ($('prepareBtn')) $('prepareBtn').onclick = prepare;
+  if ($('playBtn')) $('playBtn').onclick = play;
+  if ($('pauseBtn')) $('pauseBtn').onclick = window.pauseReplay;
+  if ($('nextBtn')) $('nextBtn').onclick = window.stepReplay;
+  if ($('resetBtn')) $('resetBtn').onclick = prepare;
+  if ($('pauseTradeBtn')) $('pauseTradeBtn').onclick = togglePauseTrade;
+
+  if ($('topSpeed')) $('topSpeed').addEventListener('change', () => {
     $('speed').value = $('topSpeed').value;
     if(timer){ stop(); play(); }
   });
-  $('speed').addEventListener('change', () => { $('topSpeed').value = $('speed').value; });
+  if ($('speed')) $('speed').addEventListener('change', () => { $('topSpeed').value = $('speed').value; });
   function stamp(d){return timeKey(d)==='00:00'?dateKey(d):`${dateKey(d)} ${timeKey(d)}`;}
-  function update(){const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config(),open=b?openPnl(b.c):0,gross=trades.reduce((s,t)=>s+t.gross,0),cost=trades.reduce((s,t)=>s+(t.gross-t.net),0),net=gross-cost,wins=trades.filter(t=>t.net>0).length,grotTotal=net+open,onePnl=b?oneTimePnl(b.c,c):0,adv=grotTotal-onePnl,avgHold=trades.length?trades.reduce((s,t)=>s+(t.exitTime-t.entryTime)/60000,0)/trades.length:0,scalpsHour=trades.length/Math.max(1/60,equityHistory.length/60),ddChange=maxOneDD>0?(maxGrotDD/maxOneDD-1)*100:0,returnCapital=peakCapital?grotTotal/peakCapital*100:0,recovery=maxGrotDD?grotTotal/maxGrotDD:0;$('sTime').textContent=b?stamp(b.dt):'—';$('sPosition').textContent=positions.length?`${c.dir==='buy'?'BUY':'SHORT'} ${netQty()}`:'0';$('sPosition').className=positions.length?(c.dir==='buy'?'green':'red'):'';$('sEntry').textContent=positions.length?fmt(avgPrice()):'—';$('sCurrent').textContent=b?fmt(b.c):'—';$('sOpen').textContent=money(open);$('sOpen').className=open>=0?'green':'red';$('sTotal').textContent=money(grotTotal);$('sTotal').className=grotTotal>=0?'green':'red';$('sumTrades').textContent=trades.length;$('sumActive').textContent=positions.length;$('sumQtyCap').textContent=c.totalQty;$('sumMaxQty').textContent=maxQtyUsed;$('sumCumulativeQty').textContent=cumulativeEntryQty;$('sumAvailableQty').textContent=Math.max(0,c.totalQty-netQty());$('sumWins').textContent=wins;$('sumWinRate').textContent=trades.length?fmt(wins/trades.length*100)+'%':'0%';$('sumGross').textContent=money(gross);$('sumCosts').textContent=money(cost);$('sumNet').textContent=money(grotTotal);$('sumNet').className=grotTotal>=0?'green':'red';$('oneEntry').textContent=`${c.dir==='buy'?'BUY':'SHORT'} @ ${fmt(benchmarkAnchor)}`;$('oneQty').textContent=c.totalQty;$('onePnl').textContent=money(onePnl);$('onePnl').className=onePnl>=0?'green':'red';$('grotAdv').textContent=money(adv);$('grotAdv').className=adv>=0?'green':'red';$('mGrotDD').textContent=ddMoney(maxGrotDD);$('mOneDD').textContent=ddMoney(maxOneDD);$('mDDReduction').textContent=maxOneDD?`${ddChange>=0?'+':''}${fmt(ddChange)}% ${ddChange>0?'worse':'lower'}`:'0%';$('mDDReduction').className=ddChange<=0?'green':'red';$('mWorstGrot').textContent=money(worstGrot);$('mWorstGrot').className=worstGrot>=0?'green':'red';$('mWorstOne').textContent=money(worstOne);$('mWorstOne').className=worstOne>=0?'green':'red';$('mPeakCapital').textContent=money(peakCapital);$('mReturnCapital').textContent=fmt(returnCapital)+'%';$('mRecovery').textContent=fmt(recovery)+'×';$('mAvgHold').textContent=fmt(avgHold)+' min';$('mScalpsHour').textContent=fmt(scalpsHour);$('mLocked').textContent=money(net);$('mLocked').className=net>=0?'green':'red';$('mWinner').textContent=maxGrotDD<maxOneDD?'GROT':maxGrotDD>maxOneDD?'ONE-TIME':'TIE';$('mWinner').className=maxGrotDD<=maxOneDD?'green':'red';$('tradeLog').innerHTML=trades.length?trades.map((t,i)=>`<tr><td>${i+1}</td><td class="${t.side==='buy'?'green':'red'}">${t.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(t.entryTime)} @ ${fmt(t.entry)}</td><td>${stamp(t.exitTime)} @ ${fmt(t.exit)}</td><td>${t.qty}</td><td class="${t.net>=0?'green':'red'}">${money(t.net)}</td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr>';draw();drawEquity();}
-  function draw(){
-    const canvas=$('chart');
-    if(!canvas) return;
-    const rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;
-    canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;
-    const x=canvas.getContext('2d');x.scale(dpr,dpr);
-    const W=rect.width,H=rect.height;x.fillStyle='#081524';x.fillRect(0,0,W,H);
-    if(!sessionBars.length)return;
+
+  function update(){
+    const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config();
+    const open=b?openPnl(b.c):0;
+    const gross=trades.reduce((s,t)=>s+t.gross,0);
+    const cost=trades.reduce((s,t)=>s+(t.cost !== undefined ? t.cost : (t.gross-t.net)),0);
+    const net=gross-cost;
+    const wins=trades.filter(t=>t.net>0).length;
+    const grotTotal=net+open;
+    const onePnl=b?oneTimePnl(b.c,c):0;
+    const adv=grotTotal-onePnl;
+    const avgHold=trades.length?trades.reduce((s,t)=>s+(t.exitTime-t.entryTime)/60000,0)/trades.length:0;
+    const scalpsHour=trades.length/Math.max(1/60,equityHistory.length/60);
+    const ddChange=maxOneDD>0?(maxGrotDD/maxOneDD-1)*100:0;
+    const returnCapital=peakCapital?grotTotal/peakCapital*100:0;
+    const recovery=maxGrotDD?grotTotal/maxGrotDD:0;
     
-    const c=config();
-    const currentIdx = Math.min(idx, sessionBars.length - 1);
-    const visibleStart = Math.max(0, currentIdx - 79);
-    const a = sessionBars.slice(visibleStart, currentIdx + 1);
+    if ($('sTime')) $('sTime').textContent=b?stamp(b.dt):'—';
+    if ($('sPosition')) {
+      $('sPosition').textContent=positions.length?`${c.dir==='buy'?'BUY':'SHORT'} ${netQty()}`:'0';
+      $('sPosition').className=positions.length?(c.dir==='buy'?'green':'red'):'';
+    }
+    if ($('sEntry')) $('sEntry').textContent=positions.length?fmt(avgPrice()):'—';
+    if ($('sCurrent')) $('sCurrent').textContent=b?fmt(b.c):'—';
+    if ($('sOpen')) {
+      $('sOpen').textContent=money(open);
+      $('sOpen').className=open>=0?'green':'red';
+    }
+    if ($('sTotal')) {
+      $('sTotal').textContent=money(grotTotal);
+      $('sTotal').className=grotTotal>=0?'green':'red';
+    }
+    if ($('sumTrades')) $('sumTrades').textContent=trades.length;
+    if ($('sumActive')) $('sumActive').textContent=positions.length;
+    if ($('sumQtyCap')) $('sumQtyCap').textContent=c.totalQty;
+    if ($('sumMaxQty')) $('sumMaxQty').textContent=maxQtyUsed;
+    if ($('sumCumulativeQty')) $('sumCumulativeQty').textContent=cumulativeEntryQty;
+    if ($('sumAvailableQty')) $('sumAvailableQty').textContent=Math.max(0,c.totalQty-netQty());
+    if ($('sumWins')) $('sumWins').textContent=wins;
+    if ($('sumWinRate')) $('sumWinRate').textContent=trades.length?fmt(wins/trades.length*100)+'%':'0%';
+    if ($('sumGross')) $('sumGross').textContent=money(gross);
+    if ($('sumCosts')) $('sumCosts').textContent=money(cost);
+    if ($('sumNet')) {
+      $('sumNet').textContent=money(grotTotal);
+      $('sumNet').className=grotTotal>=0?'green':'red';
+    }
+    if ($('oneEntry')) $('oneEntry').textContent=`${c.dir==='buy'?'BUY':'SHORT'} @ ${fmt(benchmarkAnchor)}`;
+    if ($('oneQty')) $('oneQty').textContent=c.totalQty;
+    if ($('onePnl')) {
+      $('onePnl').textContent=money(onePnl);
+      $('onePnl').className=onePnl>=0?'green':'red';
+    }
+    if ($('grotAdv')) {
+      $('grotAdv').textContent=money(adv);
+      $('grotAdv').className=adv>=0?'green':'red';
+    }
+    if ($('mGrotDD')) $('mGrotDD').textContent=ddMoney(maxGrotDD);
+    if ($('mOneDD')) $('mOneDD').textContent=ddMoney(maxOneDD);
+    if ($('mDDReduction')) $('mDDReduction').textContent=ddChange?`${ddChange>=0?'+':''}${fmt(ddChange)}%`:'0%';
+    if ($('mWorstGrot')) $('mWorstGrot').textContent=money(worstGrot);
+    if ($('mWorstOne')) $('mWorstOne').textContent=money(worstOne);
+    if ($('mPeakCapital')) $('mPeakCapital').textContent=money(peakCapital);
+    if ($('mReturnCapital')) $('mReturnCapital').textContent=fmt(returnCapital)+'%';
+    if ($('mRecovery')) $('mRecovery').textContent=fmt(recovery)+'×';
+    if ($('mAvgHold')) $('mAvgHold').textContent=fmt(avgHold)+' min';
+    if ($('mScalpsHour')) $('mScalpsHour').textContent=fmt(scalpsHour);
+    if ($('mLocked')) $('mLocked').textContent=money(realisedNet());
+    if ($('mWinner')) {
+      $('mWinner').textContent=maxGrotDD<maxOneDD?'GROT':maxGrotDD>maxOneDD?'ONE-TIME':'TIE';
+      $('mWinner').className=maxGrotDD<=maxOneDD?'green':'red';
+    }
     
-    const orderedPending=pendingLevels.slice().sort((u,v)=>c.dir==='buy'?v-u:u-v);
-    const pendingToShow=orderedPending.slice(0,Math.min(5,c.maxLots));
-    const targets=positions.map(p=>p.side==='buy'?p.entry+c.square:p.entry-c.square);
-    const scalePrices=[...a.flatMap(b=>[b.h,b.l]),...positions.map(p=>p.entry),...targets,...pendingToShow];
-    let hi=Math.max(...scalePrices),lo=Math.min(...scalePrices);const pad=(hi-lo||1)*.12;hi+=pad;lo-=pad;
-    const left=12,right=145,top=28,bottom=45,cw=(W-left-right)/Math.max(a.length,1),Y=p=>top+(hi-p)/(hi-lo)*(H-top-bottom);
-    x.font='12px Inter, Segoe UI, Arial';x.strokeStyle='#1c3047';x.lineWidth=1;
-    for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const p=hi-i*(hi-lo)/4;x.fillStyle='#7890aa';x.fillText(fmt(p),W-right+7,y+4);}
-    a.forEach((b,j)=>{const cx=left+j*cw+cw/2,up=b.c>=b.o;x.strokeStyle=up?'#20d68f':'#ff5d6c';x.fillStyle=x.strokeStyle;x.beginPath();x.moveTo(cx,Y(b.h));x.lineTo(cx,Y(b.l));x.stroke();const y=Math.min(Y(b.o),Y(b.c)),h=Math.max(2,Math.abs(Y(b.o)-Y(b.c)));x.fillRect(cx-Math.max(1,cw*.28),y,Math.max(2,cw*.56),h);});
-    const labelCount=Math.min(6,a.length),used=new Set();for(let n=0;n<labelCount;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labelCount-1));if(used.has(j))continue;used.add(j);const cx=left+j*cw+cw/2,d=a[j].dt,label=timeKey(d)==='00:00'?`${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}`:timeKey(d);x.strokeStyle='#263b55';x.beginPath();x.moveTo(cx,H-bottom);x.lineTo(cx,H-bottom+5);x.stroke();x.fillStyle='#90a4bc';x.textAlign='center';x.fillText(label,cx,H-14);}x.textAlign='left';
-    const line=(price,color,dash,label)=>{const y=Y(price);x.strokeStyle=color;x.lineWidth=1.5;x.setLineDash(dash);x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();x.setLineDash([]);x.fillStyle=color;x.font='bold 12px Inter, Segoe UI, Arial';x.fillText(label,W-right+7,y+4);};
-    for(const p of positions){const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;line(p.entry,'#ffd166',[7,5],`${p.side==='buy'?'BUY':'SHORT'} ${fmt(p.entry)}`);line(target,'#43a5ff',[3,5],`${p.side==='buy'?'SELL TARGET':'COVER TARGET'} ${fmt(target)}`);}
-    pendingToShow.forEach((price,n)=>line(price,n===0?'#20d68f':'#168d65',n===0?[8,4]:[3,6],`${n===0?'NEXT ':''}${c.dir==='buy'?'BUY':'SHORT'} ${fmt(price)}`));
-    if(positions.length){x.fillStyle='#ffd166';x.font='bold 12px Inter, Segoe UI, Arial';x.fillText('AVG '+fmt(avgPrice()),left+5,Y(avgPrice())-5);}
-    $('legend').textContent=a.length?`OHLC  ${fmt(a.at(-1).o)}  ${fmt(a.at(-1).h)}  ${fmt(a.at(-1).l)}  ${fmt(a.at(-1).c)} · Bar ${currentIdx+1}/${sessionBars.length} · Active ${positions.length} · Pending ${pendingLevels.length}`:'OHLC —';
+    if ($('tradeLog')) $('tradeLog').innerHTML=trades.length?trades.map((t,i)=>`<tr><td>${i+1}</td><td class="${t.side==='buy'?'green':'red'}">${t.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(t.entryTime)} @ ${fmt(t.entry)}</td><td>${stamp(t.exitTime)} @ ${fmt(t.exit)}</td><td>${t.qty}</td><td class="${t.net>=0?'green':'red'}">${money(t.net)} <small style="color:var(--text-dim)">(${money(t.gross)})</small></td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr>';
+    
+    draw();
+    drawEquity();
+    refreshOpenOrders();
+    refreshNextTriggers();
   }
-  function drawEquity(){const canvas=$('equityChart'),rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1;canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;const x=canvas.getContext('2d');x.scale(dpr,dpr);const W=rect.width,H=rect.height;x.fillStyle='#0b1829';x.fillRect(0,0,W,H);if(!equityHistory.length){x.fillStyle='#90a4bc';x.fillText('Start replay to build GROT vs One-Time equity curve',18,28);return;}const a=equityHistory.slice(-800),vals=a.flatMap(p=>[p.grot,p.one,0]),hi=Math.max(...vals),lo=Math.min(...vals),pad=(hi-lo||1)*.12,left=62,right=14,top=24,bottom=30,Y=v=>top+(hi+pad-v)/(hi-lo+2*pad)*(H-top-bottom),X=i=>left+i*(W-left-right)/Math.max(1,a.length-1);x.strokeStyle='#263b55';for(let i=0;i<5;i++){const y=top+i*(H-top-bottom)/4;x.beginPath();x.moveTo(left,y);x.lineTo(W-right,y);x.stroke();const v=hi+pad-i*(hi-lo+2*pad)/4;x.fillStyle='#90a4bc';x.fillText('₹'+Math.round(v).toLocaleString('en-IN'),4,y+4);}const line=(key,color)=>{x.strokeStyle=color;x.lineWidth=2;x.beginPath();a.forEach((p,i)=>{const px=X(i),py=Y(p[key]);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();};line('grot','#20d68f');line('one','#43a5ff');x.fillStyle='#20d68f';x.fillRect(left,7,16,3);x.fillText('GROT',left+22,12);x.fillStyle='#43a5ff';x.fillRect(left+82,7,16,3);x.fillText('One-Time',left+104,12);const labels=Math.min(5,a.length);x.fillStyle='#90a4bc';x.textAlign='center';for(let n=0;n<labels;n++){const j=Math.round(n*(a.length-1)/Math.max(1,labels-1));x.fillText(timeKey(a[j].dt),X(j),H-9);}x.textAlign='left';}
-  function refreshOpenOrders(){const el=$('openOrderLog');if(!el)return;const b=sessionBars.length?sessionBars[Math.min(idx,sessionBars.length-1)]:null,c=config();if(!positions.length||!b){el.innerHTML='<tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr>';return;}el.innerHTML=positions.slice().sort((a,z)=>c.dir==='buy'?z.entry-a.entry:a.entry-z.entry).map((p,i)=>{const target=p.side==='buy'?p.entry+c.square:p.entry-c.square,live=(b.c-p.entry)*(p.side==='buy'?1:-1)*p.qty;return `<tr><td>${i+1}</td><td class="${p.side==='buy'?'green':'red'}">${p.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(p.entryTime)} @ ${fmt(p.entry)}</td><td class="yellow">${p.side==='buy'?'SELL':'COVER'} @ ${fmt(target)}</td><td>${fmt(b.c)}</td><td>${p.qty}</td><td class="${live>=0?'green':'red'}">${money(live)}</td><td class="yellow">OPEN</td></tr>`;}).join('');}
-  function refreshNextTriggers(){const el=$('nextTriggers'),ref=$('lastSquareRef');if(!el||!ref)return;const c=config();ref.textContent=Number.isFinite(lastSquareOffPrice)?fmt(lastSquareOffPrice):'No square-off yet';el.textContent=pendingLevels.length?pendingLevels.slice().sort((a,z)=>c.dir==='buy'?z-a:a-z).slice(0,6).map(v=>fmt(v)).join(' · '):'—';}
-  setInterval(()=>{refreshNextTriggers();refreshOpenOrders();},250);
-  addEventListener('resize',()=>{draw();drawEquity();});
+
+  // Interactive TradingView-style Chart State & Controls
+  const chartState = {
+    visibleBars: 80,
+    minBars: 15,
+    maxBars: 1200,
+    panOffset: 0,
+    autoFollow: true,
+    showVolume: true,
+    showTrades: true,
+    isDragging: false,
+    dragStartX: 0,
+    dragStartOffset: 0,
+    crosshair: { active: false, x: 0, y: 0, price: null }
+  };
+
+  function initChartControls(){
+    const c = $('chart');
+    if (!c) return;
+
+    if ($('btnZoomIn')) $('btnZoomIn').onclick = () => {
+      chartState.visibleBars = Math.max(chartState.minBars, Math.round(chartState.visibleBars * 0.75));
+      draw();
+    };
+    if ($('btnZoomOut')) $('btnZoomOut').onclick = () => {
+      chartState.visibleBars = Math.min(chartState.maxBars, Math.round(chartState.visibleBars * 1.33));
+      draw();
+    };
+    if ($('btnFitChart')) $('btnFitChart').onclick = () => {
+      chartState.visibleBars = 80;
+      chartState.panOffset = 0;
+      chartState.autoFollow = true;
+      if ($('btnToggleFollow')) $('btnToggleFollow').classList.add('active');
+      draw();
+    };
+    if ($('btnToggleFollow')) $('btnToggleFollow').onclick = () => {
+      chartState.autoFollow = !chartState.autoFollow;
+      if (chartState.autoFollow) chartState.panOffset = 0;
+      $('btnToggleFollow').classList.toggle('active', chartState.autoFollow);
+      draw();
+    };
+    if ($('btnToggleVol')) $('btnToggleVol').onclick = () => {
+      chartState.showVolume = !chartState.showVolume;
+      $('btnToggleVol').classList.toggle('active', chartState.showVolume);
+      draw();
+    };
+    if ($('btnToggleTrades')) $('btnToggleTrades').onclick = () => {
+      chartState.showTrades = !chartState.showTrades;
+      $('btnToggleTrades').classList.toggle('active', chartState.showTrades);
+      draw();
+    };
+
+    c.addEventListener('wheel', e => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY > 0 ? 1.15 : 0.87;
+      chartState.visibleBars = Math.max(chartState.minBars, Math.min(chartState.maxBars, Math.round(chartState.visibleBars * zoomFactor)));
+      draw();
+    }, { passive: false });
+
+    c.addEventListener('mousedown', e => {
+      chartState.isDragging = true;
+      chartState.dragStartX = e.clientX;
+      chartState.dragStartOffset = chartState.panOffset;
+    });
+
+    window.addEventListener('mouseup', () => {
+      chartState.isDragging = false;
+    });
+
+    c.addEventListener('mousemove', e => {
+      const rect = c.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      if (chartState.isDragging) {
+        const dx = e.clientX - chartState.dragStartX;
+        const barWidth = (rect.width - 157) / Math.max(chartState.visibleBars, 1);
+        const shiftBars = Math.round(dx / Math.max(1, barWidth));
+        chartState.panOffset = Math.max(0, chartState.dragStartOffset + shiftBars);
+        chartState.autoFollow = false;
+        if ($('btnToggleFollow')) $('btnToggleFollow').classList.remove('active');
+      }
+
+      chartState.crosshair.active = true;
+      chartState.crosshair.x = mouseX;
+      chartState.crosshair.y = mouseY;
+      draw();
+    });
+
+    c.addEventListener('mouseleave', () => {
+      chartState.isDragging = false;
+      chartState.crosshair.active = false;
+      draw();
+    });
+
+    let touchStartDist = 0;
+    c.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) {
+        chartState.isDragging = true;
+        chartState.dragStartX = e.touches[0].clientX;
+        chartState.dragStartOffset = chartState.panOffset;
+      } else if (e.touches.length === 2) {
+        chartState.isDragging = false;
+        touchStartDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      }
+    }, { passive: true });
+
+    c.addEventListener('touchmove', e => {
+      if (e.touches.length === 1 && chartState.isDragging) {
+        const dx = e.touches[0].clientX - chartState.dragStartX;
+        const rect = c.getBoundingClientRect();
+        const barWidth = (rect.width - 157) / Math.max(chartState.visibleBars, 1);
+        chartState.panOffset = Math.max(0, chartState.dragStartOffset + Math.round(dx / Math.max(1, barWidth)));
+        chartState.autoFollow = false;
+        if ($('btnToggleFollow')) $('btnToggleFollow').classList.remove('active');
+        draw();
+      } else if (e.touches.length === 2) {
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        if (touchStartDist > 0) {
+          const factor = touchStartDist / dist;
+          chartState.visibleBars = Math.max(chartState.minBars, Math.min(chartState.maxBars, Math.round(chartState.visibleBars * factor)));
+          touchStartDist = dist;
+          draw();
+        }
+      }
+    }, { passive: true });
+
+    c.addEventListener('touchend', () => {
+      chartState.isDragging = false;
+      touchStartDist = 0;
+    });
+  }
+
+  function updateLegendUI(bar, barIdx, totalBars){
+    if (!bar) return;
+    if ($('legSym')) $('legSym').textContent = activeSymbol;
+    if ($('legO')) $('legO').textContent = fmt(bar.o);
+    if ($('legH')) $('legH').textContent = fmt(bar.h);
+    if ($('legL')) $('legL').textContent = fmt(bar.l);
+    if ($('legC')) $('legC').textContent = fmt(bar.c);
+    if ($('legVol')) $('legVol').textContent = (bar.v || 0).toLocaleString('en-IN');
+    
+    const chg = bar.c - bar.o;
+    const pct = bar.o ? (chg / bar.o) * 100 : 0;
+    if ($('legChg')) {
+      $('legChg').textContent = `${chg >= 0 ? '+' : ''}${fmt(chg)} (${pct >= 0 ? '+' : ''}${fmt(pct)}%)`;
+      $('legChg').className = chg >= 0 ? 'green' : 'red';
+    }
+    if ($('legStatus')) {
+      $('legStatus').textContent = `Bar ${barIdx + 1}/${totalBars} · ${timeKey(bar.dt)}`;
+    }
+  }
+
+  function draw(){
+    const canvas = $('chart');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const x = canvas.getContext('2d');
+    x.scale(dpr, dpr);
+    const W = rect.width, H = rect.height;
+    
+    const bgGrad = x.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#0a1220');
+    bgGrad.addColorStop(1, '#060c16');
+    x.fillStyle = bgGrad;
+    x.fillRect(0, 0, W, H);
+    
+    if (!sessionBars.length) return;
+    
+    const c = config();
+    const currentIdx = Math.min(idx, sessionBars.length - 1);
+
+    const targetEnd = chartState.autoFollow ? currentIdx : Math.max(0, Math.min(sessionBars.length - 1, currentIdx - chartState.panOffset));
+    const targetStart = Math.max(0, targetEnd - chartState.visibleBars + 1);
+    const a = sessionBars.slice(targetStart, targetEnd + 1);
+    
+    const left = 14, right = 145, top = 36, bottomTime = 28;
+    const volHeight = chartState.showVolume ? Math.min(90, Math.round(H * 0.18)) : 0;
+    const mainBottom = H - bottomTime - volHeight;
+
+    const orderedPending = pendingLevels.slice().sort((u,v) => c.dir === 'buy' ? v - u : u - v);
+    const pendingToShow = orderedPending.slice(0, Math.min(5, c.maxLots));
+    const targets = positions.map(p => p.side === 'buy' ? p.entry + c.square : p.entry - c.square);
+    const scalePrices = [...a.flatMap(b => [b.h, b.l]), ...positions.map(p => p.entry), ...targets, ...pendingToShow];
+    let hi = Math.max(...scalePrices), lo = Math.min(...scalePrices);
+    const pad = (hi - lo || 1) * 0.12;
+    hi += pad; lo -= pad;
+    
+    const cw = (W - left - right) / Math.max(a.length, 1);
+    const Y = p => top + (hi - p) / (hi - lo) * (mainBottom - top);
+    const maxVol = Math.max(...a.map(b => b.v || 0), 1000);
+    const VolY = v => (H - bottomTime) - (v / maxVol) * (volHeight - 10);
+
+    // 1. Grid Lines & Axis
+    x.font = '11px "JetBrains Mono", Consolas, monospace';
+    x.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      const y = top + i * (mainBottom - top) / 4;
+      x.strokeStyle = 'rgba(29, 44, 68, 0.5)';
+      x.beginPath(); x.moveTo(left, y); x.lineTo(W - right, y); x.stroke();
+      const p = hi - i * (hi - lo) / 4;
+      x.fillStyle = '#64748b';
+      x.fillText(fmt(p), W - right + 8, y + 4);
+    }
+
+    if (chartState.showVolume) {
+      x.strokeStyle = 'rgba(29, 44, 68, 0.4)';
+      x.beginPath(); x.moveTo(left, mainBottom); x.lineTo(W - right, mainBottom); x.stroke();
+      x.fillStyle = '#64748b';
+      x.font = '10px "JetBrains Mono", Consolas, monospace';
+      x.fillText('VOL', left + 4, mainBottom + 14);
+      x.fillText((maxVol).toLocaleString('en-IN'), W - right + 8, mainBottom + 14);
+    }
+
+    // 2. Volume Bars
+    if (chartState.showVolume) {
+      a.forEach((b, j) => {
+        const cx = left + j * cw + cw / 2;
+        const up = b.c >= b.o;
+        x.fillStyle = up ? 'rgba(16, 185, 129, 0.42)' : 'rgba(244, 63, 94, 0.42)';
+        const vy = VolY(b.v || 0);
+        const vh = Math.max(2, (H - bottomTime) - vy);
+        x.fillRect(cx - Math.max(1, cw * 0.36), vy, Math.max(2, cw * 0.72), vh);
+      });
+    }
+
+    // 3. Candlesticks
+    a.forEach((b, j) => {
+      const cx = left + j * cw + cw / 2, up = b.c >= b.o;
+      const color = up ? '#10b981' : '#f43f5e';
+      x.strokeStyle = color;
+      x.fillStyle = color;
+      
+      x.beginPath();
+      x.moveTo(cx, Y(b.h));
+      x.lineTo(cx, Y(b.l));
+      x.stroke();
+      
+      const y = Math.min(Y(b.o), Y(b.c));
+      const h = Math.max(2, Math.abs(Y(b.o) - Y(b.c)));
+      const bw = Math.max(2, cw * 0.65);
+      x.fillRect(cx - bw / 2, y, bw, h);
+    });
+
+    // 4. Time Axis Labels
+    const labelCount = Math.min(6, a.length), used = new Set();
+    x.textAlign = 'center';
+    x.font = '11px "JetBrains Mono", Consolas, monospace';
+    for (let n = 0; n < labelCount; n++) {
+      const j = Math.round(n * (a.length - 1) / Math.max(1, labelCount - 1));
+      if (used.has(j)) continue;
+      used.add(j);
+      const cx = left + j * cw + cw / 2, d = a[j].dt;
+      const label = timeKey(d) === '00:00' ? `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}` : timeKey(d);
+      x.strokeStyle = 'rgba(29, 44, 68, 0.7)';
+      x.beginPath(); x.moveTo(cx, H - bottomTime); x.lineTo(cx, H - bottomTime + 5); x.stroke();
+      x.fillStyle = '#64748b';
+      x.fillText(label, cx, H - 10);
+    }
+    x.textAlign = 'left';
+
+    // 5. Dynamic Ladder Overlay Lines
+    const line = (price, color, dash, label) => {
+      const y = Y(price);
+      if (y < top - 20 || y > mainBottom + 20) return;
+      x.strokeStyle = color;
+      x.lineWidth = 1.5;
+      x.setLineDash(dash);
+      x.beginPath(); x.moveTo(left, y); x.lineTo(W - right, y); x.stroke();
+      x.setLineDash([]);
+      x.fillStyle = color;
+      x.font = 'bold 11px "Plus Jakarta Sans", sans-serif';
+      x.fillText(label, W - right + 8, y + 4);
+    };
+
+    for (const p of positions) {
+      const target = p.side === 'buy' ? p.entry + c.square : p.entry - c.square;
+      line(p.entry, '#f59e0b', [6, 4], `${p.side === 'buy' ? 'BUY' : 'SHORT'} ${fmt(p.entry)} (${p.qty})`);
+      line(target, '#38bdf8', [3, 4], `TARGET ${fmt(target)}`);
+    }
+    pendingToShow.forEach((price, n) => line(price, n === 0 ? '#10b981' : '#047857', n === 0 ? [6, 4] : [2, 4], `${n === 0 ? 'NEXT ' : ''}${c.dir === 'buy' ? 'BUY' : 'SHORT'} ${fmt(price)}`));
+    if (positions.length) {
+      x.fillStyle = '#f59e0b';
+      x.font = 'bold 11px "Plus Jakarta Sans", sans-serif';
+      x.fillText('AVG ' + fmt(avgPrice()), left + 6, Y(avgPrice()) - 6);
+    }
+
+    // 6. Trade Markers / Executions on Chart
+    if (chartState.showTrades && trades.length) {
+      trades.forEach(t => {
+        const entryIdx = a.findIndex(b => b.dt.getTime() === t.entryTime.getTime());
+        if (entryIdx >= 0) {
+          const bar = a[entryIdx];
+          const cx = left + entryIdx * cw + cw / 2;
+          const isBuy = t.side === 'buy';
+          const arrowY = isBuy ? Y(bar.l) + 14 : Y(bar.h) - 14;
+          x.fillStyle = isBuy ? '#10b981' : '#f43f5e';
+          x.font = '12px "Plus Jakarta Sans", sans-serif';
+          x.textAlign = 'center';
+          x.fillText(isBuy ? '▲' : '▼', cx, arrowY);
+        }
+
+        const exitIdx = a.findIndex(b => b.dt.getTime() === t.exitTime.getTime());
+        if (exitIdx >= 0) {
+          const bar = a[exitIdx];
+          const cx = left + exitIdx * cw + cw / 2;
+          const exitY = Y(t.exit);
+          const isWin = t.net >= 0;
+          x.fillStyle = isWin ? 'rgba(16, 185, 129, 0.9)' : 'rgba(244, 63, 94, 0.9)';
+          x.fillRect(cx - 24, exitY - 10, 48, 18);
+          x.fillStyle = '#ffffff';
+          x.font = 'bold 10px "JetBrains Mono", monospace';
+          x.textAlign = 'center';
+          x.fillText(`${isWin ? '+' : ''}${Math.round(t.net)}`, cx, exitY + 4);
+        }
+      });
+      x.textAlign = 'left';
+    }
+
+    // 7. Interactive Crosshair & Tooltip
+    let activeBar = a.at(-1);
+    let activeBarIdx = targetEnd;
+    if (chartState.crosshair.active && chartState.crosshair.x >= left && chartState.crosshair.x <= W - right) {
+      const relX = chartState.crosshair.x - left;
+      const hoveredIndexInA = Math.min(a.length - 1, Math.max(0, Math.floor(relX / cw)));
+      activeBar = a[hoveredIndexInA];
+      activeBarIdx = targetStart + hoveredIndexInA;
+
+      const snapX = left + hoveredIndexInA * cw + cw / 2;
+      const snapY = chartState.crosshair.y;
+      const hoverPrice = hi - (snapY - top) / (mainBottom - top) * (hi - lo);
+
+      x.strokeStyle = 'rgba(100, 116, 139, 0.5)';
+      x.setLineDash([4, 4]);
+      x.beginPath(); x.moveTo(snapX, top); x.lineTo(snapX, H - bottomTime); x.stroke();
+
+      if (snapY >= top && snapY <= mainBottom) {
+        x.beginPath(); x.moveTo(left, snapY); x.lineTo(W - right, snapY); x.stroke();
+
+        x.setLineDash([]);
+        x.fillStyle = '#1e293b';
+        x.fillRect(W - right + 2, snapY - 10, right - 6, 20);
+        x.strokeStyle = '#38bdf8';
+        x.strokeRect(W - right + 2, snapY - 10, right - 6, 20);
+        x.fillStyle = '#ffffff';
+        x.font = 'bold 11px "JetBrains Mono", monospace';
+        x.fillText(fmt(hoverPrice), W - right + 10, snapY + 4);
+      }
+
+      x.setLineDash([]);
+      x.fillStyle = '#1e293b';
+      x.fillRect(snapX - 35, H - bottomTime + 2, 70, 18);
+      x.strokeStyle = '#38bdf8';
+      x.strokeRect(snapX - 35, H - bottomTime + 2, 70, 18);
+      x.fillStyle = '#ffffff';
+      x.font = 'bold 10px "JetBrains Mono", monospace';
+      x.textAlign = 'center';
+      x.fillText(timeKey(activeBar.dt), snapX, H - bottomTime + 15);
+      x.textAlign = 'left';
+    }
+
+    if (activeBar) {
+      updateLegendUI(activeBar, activeBarIdx, sessionBars.length);
+    }
+  }
+
+  function drawEquity(){
+    const canvas = $('equityChart');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const x = canvas.getContext('2d');
+    x.scale(dpr, dpr);
+    const W = rect.width, H = rect.height;
+    
+    x.fillStyle = 'transparent';
+    x.fillRect(0, 0, W, H);
+    if (!equityHistory.length) {
+      x.fillStyle = '#64748b';
+      x.font = '12px "Plus Jakarta Sans", sans-serif';
+      x.fillText('Start replay to build GROT vs One-Time equity curve', 18, 28);
+      return;
+    }
+    const a = equityHistory.slice(-800), vals = a.flatMap(p => [p.grot, p.one, 0]);
+    const hi = Math.max(...vals), lo = Math.min(...vals), pad = (hi - lo || 1) * 0.12;
+    const left = 64, right = 16, top = 24, bottom = 28;
+    const Y = v => top + (hi + pad - v) / (hi - lo + 2 * pad) * (H - top - bottom);
+    const X = i => left + i * (W - left - right) / Math.max(1, a.length - 1);
+    
+    x.strokeStyle = 'rgba(29, 44, 68, 0.6)';
+    x.lineWidth = 1;
+    x.font = '10px "JetBrains Mono", monospace';
+    for (let i = 0; i < 5; i++) {
+      const y = top + i * (H - top - bottom) / 4;
+      x.beginPath(); x.moveTo(left, y); x.lineTo(W - right, y); x.stroke();
+      const v = hi + pad - i * (hi - lo + 2 * pad) / 4;
+      x.fillStyle = '#64748b';
+      x.fillText('₹' + Math.round(v).toLocaleString('en-IN'), 6, y + 4);
+    }
+    
+    const line = (key, color) => {
+      x.strokeStyle = color;
+      x.lineWidth = 2;
+      x.beginPath();
+      a.forEach((p, i) => {
+        const px = X(i), py = Y(p[key]);
+        i ? x.lineTo(px, py) : x.moveTo(px, py);
+      });
+      x.stroke();
+    };
+    line('grot', '#10b981');
+    line('one', '#38bdf8');
+    
+    x.fillStyle = '#10b981'; x.fillRect(left, 7, 14, 3);
+    x.font = '11px "Plus Jakarta Sans", sans-serif'; x.fillStyle = '#f8fafc'; x.fillText('GROT Total', left + 20, 12);
+    x.fillStyle = '#38bdf8'; x.fillRect(left + 100, 7, 14, 3);
+    x.fillStyle = '#f8fafc'; x.fillText('One-Time Hold', left + 120, 12);
+    
+    const labels = Math.min(5, a.length);
+    x.fillStyle = '#64748b';
+    x.textAlign = 'center';
+    x.font = '10px "JetBrains Mono", monospace';
+    for (let n = 0; n < labels; n++) {
+      const j = Math.round(n * (a.length - 1) / Math.max(1, labels - 1));
+      x.fillText(timeKey(a[j].dt), X(j), H - 8);
+    }
+    x.textAlign = 'left';
+  }
+
+  function refreshOpenOrders(){
+    const el = $('openOrderLog');
+    if (!el) return;
+    const b = sessionBars.length ? sessionBars[Math.min(idx, sessionBars.length - 1)] : null, c = config();
+    if (!positions.length || !b) {
+      el.innerHTML = '<tr><td colspan="9" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr>';
+      return;
+    }
+    const sorted = positions.slice().sort((a, z) => c.dir === 'buy' ? z.entry - a.entry : a.entry - z.entry);
+    let runningCap = 0;
+    el.innerHTML = sorted.map((p, i) => {
+      const target = p.side === 'buy' ? p.entry + c.square : p.entry - c.square;
+      const live = (b.c - p.entry) * (p.side === 'buy' ? 1 : -1) * p.qty;
+      const legCap = p.entry * p.qty;
+      runningCap += legCap;
+      return `<tr>
+        <td>${i + 1}</td>
+        <td class="${p.side === 'buy' ? 'green' : 'red'}">${p.side === 'buy' ? 'BUY' : 'SHORT'}</td>
+        <td>${stamp(p.entryTime)} @ ${fmt(p.entry)}</td>
+        <td class="yellow">${p.side === 'buy' ? 'SELL' : 'COVER'} @ ${fmt(target)}</td>
+        <td>${fmt(b.c)}</td>
+        <td>${p.qty}</td>
+        <td><strong>${money(runningCap)}</strong> <small style="color:var(--text-dim)">(${money(legCap)})</small></td>
+        <td class="${live >= 0 ? 'green' : 'red'}">${money(live)}</td>
+        <td class="yellow">OPEN</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function refreshNextTriggers(){
+    const el = $('nextTriggers'), ref = $('lastSquareRef');
+    if (!el || !ref) return;
+    const c = config();
+    ref.textContent = Number.isFinite(lastSquareOffPrice) ? fmt(lastSquareOffPrice) : 'No square-off yet';
+    el.textContent = pendingLevels.length ? pendingLevels.slice().sort((a, z) => c.dir === 'buy' ? z - a : a - z).slice(0, 6).map(v => fmt(v)).join(' · ') : '—';
+  }
+  
+  initChartControls();
+  setInterval(() => { refreshNextTriggers(); refreshOpenOrders(); }, 250);
+  window.addEventListener('resize', () => { draw(); drawEquity(); });
 })();
 </script>
 </body>
