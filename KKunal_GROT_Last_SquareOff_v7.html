@@ -411,12 +411,12 @@
 
     <div class="panel chart-wrap" id="chartContainer">
       <div class="chart-toolbar">
-        <button type="button" id="btnZoomIn" title="Zoom In (+)">+</button>
-        <button type="button" id="btnZoomOut" title="Zoom Out (−)">−</button>
-        <button type="button" id="btnFitChart" title="Reset View / Fit (⟲)">⟲</button>
-        <button type="button" id="btnToggleFollow" class="active" title="Auto-Follow Replay Head">📍 Follow</button>
-        <button type="button" id="btnToggleVol" class="active" title="Toggle Volume Sub-pane">📊 Vol</button>
-        <button type="button" id="btnToggleTrades" class="active" title="Toggle Trade Markers">🏷️ Trades</button>
+        <button type="button" id="btnZoomIn" title="Zoom In (+)" disabled>+</button>
+        <button type="button" id="btnZoomOut" title="Zoom Out (−)" disabled>−</button>
+        <button type="button" id="btnFitChart" title="Reset View / Fit (⟲)" disabled>⟲</button>
+        <button type="button" id="btnToggleFollow" class="active" title="Auto-Follow Replay Head" disabled>📍 Follow</button>
+        <button type="button" id="btnToggleVol" class="active" title="Toggle Volume Sub-pane" disabled>📊 Vol</button>
+        <button type="button" id="btnToggleTrades" class="active" title="Toggle Trade Markers" disabled>🏷️ Trades</button>
       </div>
       <canvas id="chart"></canvas>
       <div class="legend" id="legend">
@@ -547,7 +547,6 @@
   let allBars=[], sessionBars=[], dates=[], idx=0, timer=null, positions=[], pendingLevels=[], trades=[], prepared=false, strategyStopped=false, tradingPaused=false, sessionStartRealised=0, anchorPrice=0, benchmarkAnchor=0, lastSquareOffPrice=NaN, maxQtyUsed=0, cumulativeEntryQty=0, equityHistory=[], grotPeak=0, onePeak=0, maxGrotDD=0, maxOneDD=0, worstGrot=0, worstOne=0, peakCapital=0;
   let activeTab = 'choice';
   let activeSymbol = 'NIFTY';
-  let activeSymbol = 'NIFTY';
 
   const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   const money = n => '₹'+fmt(n);
@@ -576,6 +575,8 @@
   </div>`;
 
   function showEmpty(message) {
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=true);
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=true);
     const el = $('empty');
     if(!el) return;
     el.style.display = 'grid';
@@ -659,6 +660,7 @@
   window.closeAuthModal = () => {
     const modal = $('authModal');
     if(modal) modal.style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
   };
   $('choiceBadge').onclick = window.openAuthModal;
 
@@ -727,6 +729,7 @@
     $('modalSessionId').value = '';
     $('modalTotp').value = '';
     $('otpBox').style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
     checkAuthStatus();
     alert('Choice session cleared from this browser.');
   };
@@ -983,9 +986,11 @@
           symbolList.style.display = 'block';
         } else {
           symbolList.style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
         }
       } catch(e) {
         symbolList.style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
       }
     }, 200);
   });
@@ -1003,12 +1008,14 @@
       chip.classList.toggle('active', label === String(sym).split(' ')[0] || label === String(sym));
     });
     symbolList.style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
     updateFlow();
   };
 
   document.addEventListener('click', e => {
     if(!symbolInput.contains(e.target) && !symbolList.contains(e.target)) {
       symbolList.style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
     }
   });
 
@@ -1417,6 +1424,7 @@
 
     const emptyEl = $('empty');
     if (emptyEl) emptyEl.style.display = 'none';
+    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
     
     $('appStatus').textContent = `Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
     setReplayHint(`Ready · ${sessionBars.length} bars. Press Play or step +1 Bar.`, true);
