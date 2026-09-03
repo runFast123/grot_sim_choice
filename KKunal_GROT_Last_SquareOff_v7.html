@@ -90,7 +90,7 @@
     button.sell{background:#48242d;color:#ff8d98;border-color:#803846}
     button.warn{color:var(--yellow)}
     button:disabled{opacity:.42;cursor:not-allowed;transform:none}
-    .button-row{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+    .button-row{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 
     .chip-row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px}
     .chip{
@@ -356,7 +356,7 @@
     <div class="section" id="sidebarReplay" style="display:none">
       <div class="section-title">4 · Replay controls</div>
       <button class="primary" id="prepareBtn" disabled>Prepare Scalping</button>
-      <div class="button-row" style="margin-top:8px"><button class="buy" id="playBtn" disabled>Play</button><button id="pauseBtn" disabled>Pause</button><button id="nextBtn" disabled>+1 Bar</button><button class="warn" id="resetBtn" disabled>Reset</button></div>
+      <div class="button-row" style="margin-top:8px"><button class="buy" id="playBtn" disabled>Play</button><button id="pauseBtn" disabled>Pause</button><button id="nextBtn" disabled>+1 Bar</button><button type="button" class="warn" id="pauseTradeBtn" onclick="togglePauseTrade()" disabled>Pause Trade</button><button class="warn" id="resetBtn" disabled>Reset</button></div>
     </div>
   </aside>
   <section class="workspace">
@@ -370,6 +370,7 @@
         <button class="buy" id="topPlayBtn" onclick="play()" disabled>Play</button>
         <button id="topPauseBtn" onclick="pauseReplay()" disabled>Pause</button>
         <button id="topNextBtn" onclick="stepReplay()" disabled>+1 Bar</button>
+        <button type="button" class="warn" id="topPauseTradeBtn" onclick="togglePauseTrade()" disabled title="Pause or resume new trades while keeping chart replay running">Pause Trade</button>
         <button class="warn" id="topResetBtn" onclick="prepare()" disabled>Reset</button>
       </div>
       <div class="replay-speed">
@@ -420,7 +421,7 @@
     <div class="bottom">
       <div class="panel">
         <div class="section-title">Open orders</div>
-        <div class="table-wrap" style="max-height:160px;margin-bottom:18px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="8" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div>
+        <div class="table-wrap" style="max-height:160px;margin-bottom:18px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Target</th><th>Current</th><th>Qty</th><th>Capital Deployed (Cum.)</th><th>Live MTM</th><th>Status</th></tr></thead><tbody id="openOrderLog"><tr><td colspan="9" class="table-empty">No open orders yet. Play the replay to fill the ladder.</td></tr></tbody></table></div>
         <div class="section-title" style="border-top:1px solid var(--line-soft);padding-top:16px">Completed orders</div>
         <div class="table-wrap" style="max-height:260px"><table><thead><tr><th>#</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead><tbody id="tradeLog"><tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr></tbody></table></div>
       </div>
@@ -520,7 +521,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   window.$ = $;
-  let allBars=[], sessionBars=[], dates=[], idx=0, timer=null, positions=[], pendingLevels=[], trades=[], prepared=false, strategyStopped=false, sessionStartRealised=0, anchorPrice=0, benchmarkAnchor=0, lastSquareOffPrice=NaN, maxQtyUsed=0, cumulativeEntryQty=0, equityHistory=[], grotPeak=0, onePeak=0, maxGrotDD=0, maxOneDD=0, worstGrot=0, worstOne=0, peakCapital=0;
+  let allBars=[], sessionBars=[], dates=[], idx=0, timer=null, positions=[], pendingLevels=[], trades=[], prepared=false, strategyStopped=false, tradingPaused=false, sessionStartRealised=0, anchorPrice=0, benchmarkAnchor=0, lastSquareOffPrice=NaN, maxQtyUsed=0, cumulativeEntryQty=0, equityHistory=[], grotPeak=0, onePeak=0, maxGrotDD=0, maxOneDD=0, worstGrot=0, worstOne=0, peakCapital=0;
   let activeTab = 'choice';
 
   const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
@@ -1175,6 +1176,7 @@
   function timeKey(d){return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
   
   function parseCSV(text){const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim());if(lines.length<2)throw Error('CSV has no data rows.');const delim=(lines[0].match(/;/g)||[]).length>(lines[0].match(/,/g)||[]).length?';':',';const headers=splitCSVLine(lines[0],delim).map(norm);const exact=(...names)=>headers.findIndex(h=>names.includes(h));const like=(...names)=>headers.findIndex(h=>names.some(n=>h===n||h.startsWith(n)||h.includes(n)));const iDT=like('timestampisoist','datetime','timestamp','dateandtime','datetimeist'),iD=exact('date','tradedate'),iT=exact('time','tradetime'),iO=exact('open','o'),iH=exact('high','h'),iL=exact('low','l'),iC=exact('close','c','ltp'),iV=exact('volume','vol','v');if([iO,iH,iL,iC].some(i=>i<0)||(iDT<0&&iD<0))throw Error('Required columns not found: timestamp/date, open, high, low, close.');const bars=[];let invalid=0;for(let n=1;n<lines.length;n++){const a=splitCSVLine(lines[n],delim);let raw=iDT>=0?a[iDT]:`${a[iD]} ${iT>=0?a[iT]:'00:00'}`;const dt=parseDate(raw),o=+String(a[iO]).replace(/,/g,''),h=+String(a[iH]).replace(/,/g,''),l=+String(a[iL]).replace(/,/g,''),c=+String(a[iC]).replace(/,/g,'');if(dt&&[o,h,l,c].every(Number.isFinite)){if(h<Math.max(o,c)||l>Math.min(o,c)||h<l){invalid++;continue;}bars.push({dt,o,h,l,c,v:iV>=0?(+a[iV]||0):0});}}bars.sort((a,b)=>a.dt-b.dt);if(!bars.length)throw Error('No valid OHLC rows could be parsed.');if(invalid)$('appStatus').textContent=`Warning: ${invalid} invalid OHLC rows skipped`;return bars;}
+  window.parseCSV = parseCSV;
   
   $('csvFile').addEventListener('change',async e=>{
     try{
