@@ -1255,6 +1255,8 @@
   $('startTime').addEventListener('change', () => { if(prepared) prepare(); });
   $('endTime').addEventListener('change', () => { if(prepared) prepare(); });
 
+  let needsRender = false;
+  
   function config(){
     const perQty = Math.max(1, Math.floor(+$('perTradeQty').value));
     const maxLots = Math.max(1, Math.floor(+$('maxOpenLots').value));
@@ -1357,11 +1359,11 @@
       if (tradingPaused) {
         btn.textContent = '▶ Resume Trade';
         btn.title = 'Trading is PAUSED (replay continues). Click to resume new trade entries.';
-        btn.style.background = 'rgba(245,158,11,0.22)';
+        btn.style.background = 'rgba(245,158,11,0.15)';
         btn.style.color = 'var(--yellow)';
         btn.style.borderColor = 'var(--yellow)';
       } else {
-        btn.textContent = 'Pause Trade';
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg> Pause Trade';
         btn.title = 'Pause new trades while keeping chart replay running';
         btn.style.background = '';
         btn.style.color = '';
@@ -1381,6 +1383,81 @@
   }
   window.togglePauseTrade = togglePauseTrade;
 
+  // Indicator Setup
+  function calcIndicators() {
+    const maType = $('maType') ? $('maType').value : 'SMA';
+    const maPeriod = $('maPeriod') ? +$('maPeriod').value : 20;
+    const stPeriod = $('stPeriod') ? +$('stPeriod').value : 10;
+    const stMult = $('stMult') ? +$('stMult').value : 3;
+    const rsiPeriod = $('rsiPeriod') ? +$('rsiPeriod').value : 14;
+
+    let trArr = [];
+    allBars.forEach((b, i) => {
+      // MA
+      if (i === 0) { b.ma = b.c; b.ema = b.c; }
+      else {
+        if (i >= maPeriod - 1) {
+          let sum = 0; for(let j=0; j<maPeriod; j++) sum += allBars[i-j].c;
+          b.sma = sum / maPeriod;
+        }
+        const k = 2 / (maPeriod + 1);
+        b.ema = (b.c - allBars[i-1].ema) * k + allBars[i-1].ema;
+      }
+      b.ma = maType === 'SMA' ? (b.sma || b.c) : b.ema;
+
+      // ATR & SuperTrend
+      const prevC = i > 0 ? allBars[i-1].c : b.o;
+      const tr = Math.max(b.h - b.l, Math.abs(b.h - prevC), Math.abs(b.l - prevC));
+      trArr.push(tr);
+      
+      let atr = tr;
+      if (i >= stPeriod) {
+        atr = (allBars[i-1].atr * (stPeriod - 1) + tr) / stPeriod;
+      } else if (i === stPeriod - 1) {
+        atr = trArr.slice(0, stPeriod).reduce((a,v)=>a+v,0)/stPeriod;
+      }
+      b.atr = atr;
+
+      const hl2 = (b.h + b.l) / 2;
+      const basicUb = hl2 + stMult * atr;
+      const basicLb = hl2 - stMult * atr;
+      
+      if (i === 0) {
+        b.stUb = basicUb; b.stLb = basicLb; b.stDir = 1; b.st = basicLb;
+      } else {
+        const prevUb = allBars[i-1].stUb, prevLb = allBars[i-1].stLb, prevDir = allBars[i-1].stDir;
+        b.stUb = (basicUb < prevUb || prevC > prevUb) ? basicUb : prevUb;
+        b.stLb = (basicLb > prevLb || prevC < prevLb) ? basicLb : prevLb;
+        
+        if (prevDir === 1 && b.c <= b.stLb) b.stDir = -1;
+        else if (prevDir === -1 && b.c >= b.stUb) b.stDir = 1;
+        else b.stDir = prevDir;
+        
+        b.st = b.stDir === 1 ? b.stLb : b.stUb;
+      }
+
+      // RSI
+      if (i === 0) {
+        b.rsiGain = 0; b.rsiLoss = 0; b.rsi = 50;
+      } else {
+        const change = b.c - prevC;
+        const gain = Math.max(0, change), loss = Math.max(0, -change);
+        if (i < rsiPeriod) {
+          b.rsiGain = (allBars[i-1].rsiGain * i + gain) / (i + 1);
+          b.rsiLoss = (allBars[i-1].rsiLoss * i + loss) / (i + 1);
+        } else {
+          b.rsiGain = (allBars[i-1].rsiGain * (rsiPeriod - 1) + gain) / rsiPeriod;
+          b.rsiLoss = (allBars[i-1].rsiLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
+        }
+        b.rsi = b.rsiLoss === 0 ? 100 : 100 - (100 / (1 + b.rsiGain / b.rsiLoss));
+      }
+    });
+  }
+
+  ['showMA','maType','maPeriod','showST','stPeriod','stMult','showRSI','rsiPeriod'].forEach(id => {
+    if($(id)) $(id).addEventListener('change', () => { if(allBars.length) { calcIndicators(); needsRender = true; } });
+  });
+
   function prepare(){
     stop();
     if (!allBars.length) {
@@ -1390,6 +1467,8 @@
     }
     const c = config(), day = $('tradeDate').value || (dates.length ? dates.at(-1) : '');
     
+    calcIndicators();
+
     sessionBars = allBars.filter(b => {
       const d = dateKey(b.dt), t = timeKey(b.dt);
       if (c.selection === 'date') return d >= day;
@@ -1445,12 +1524,12 @@
     $('appStatus').textContent = `Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
     setReplayHint(`Ready · ${sessionBars.length} bars. Press Play or step +1 Bar.`, true);
     updateFlow();
-    update();
+    updateData();
+    needsRender = true;
   }
 
   function highest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=-Infinity;for(let i=start;i<=end;i++)x=Math.max(x,a[i][k]);return end-start+1>=len?x:NaN;}
   function lowest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=Infinity;for(let i=start;i<=end;i++)x=Math.min(x,a[i][k]);return end-start+1>=len?x:NaN;}
-  function calcRSI(a,i,len){if(i<len)return NaN;let g=0,l=0;for(let j=i-len+1;j<=i;j++){let d=a[j].c-a[j-1].c;if(d>0)g+=d;else l-=d;}if(l===0)return 100;return 100-(100/(1+(g/len)/(l/len)));}
   function netQty(){return positions.reduce((s,p)=>s+p.qty,0);}
   function avgPrice(){const q=netQty();return q?positions.reduce((s,p)=>s+p.entry*p.qty,0)/q:NaN;}
   function openPnl(price){return positions.reduce((s,p)=>s+(price-p.entry)*(p.side==='buy'?1:-1)*p.qty,0);}
@@ -1560,7 +1639,8 @@
       processEntries(b,c,blocked);
     }
     recordMetrics(b,c);
-    update();
+    updateData();
+    needsRender = true;
     idx++;
     if(idx>=sessionBars.length){
       stop();
@@ -1609,7 +1689,7 @@
   if ($('speed')) $('speed').addEventListener('change', () => { $('topSpeed').value = $('speed').value; });
   function stamp(d){return timeKey(d)==='00:00'?dateKey(d):`${dateKey(d)} ${timeKey(d)}`;}
 
-  function update(){
+  function updateData(){
     const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config();
     const open=b?openPnl(b.c):0;
     const gross=trades.reduce((s,t)=>s+t.gross,0);
@@ -1681,12 +1761,20 @@
     }
     
     if ($('tradeLog')) $('tradeLog').innerHTML=trades.length?trades.map((t,i)=>`<tr><td>${i+1}</td><td class="${t.side==='buy'?'green':'red'}">${t.side==='buy'?'BUY':'SHORT'}</td><td>${stamp(t.entryTime)} @ ${fmt(t.entry)}</td><td>${stamp(t.exitTime)} @ ${fmt(t.exit)}</td><td>${t.qty}</td><td class="${t.net>=0?'green':'red'}">${money(t.net)} <small style="color:var(--text-dim)">(${money(t.gross)})</small></td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7" class="table-empty">No completed trades yet. Square-offs appear here during replay.</td></tr>';
-    
-    draw();
-    drawEquity();
-    refreshOpenOrders();
-    refreshNextTriggers();
   }
+
+  // Render Loop Separation
+  function renderLoop() {
+    if (needsRender) {
+      draw();
+      drawEquity();
+      refreshOpenOrders();
+      refreshNextTriggers();
+      needsRender = false;
+    }
+    requestAnimationFrame(renderLoop);
+  }
+  requestAnimationFrame(renderLoop);
 
   // Interactive TradingView-style Chart State & Controls
   const chartState = {
@@ -1702,144 +1790,6 @@
     dragStartOffset: 0,
     crosshair: { active: false, x: 0, y: 0, price: null }
   };
-
-  function initChartControls(){
-    const c = $('chart');
-    if (!c) return;
-
-    if ($('btnZoomIn')) $('btnZoomIn').onclick = () => {
-      chartState.visibleBars = Math.max(chartState.minBars, Math.round(chartState.visibleBars * 0.75));
-      draw();
-    };
-    if ($('btnZoomOut')) $('btnZoomOut').onclick = () => {
-      chartState.visibleBars = Math.min(chartState.maxBars, Math.round(chartState.visibleBars * 1.33));
-      draw();
-    };
-    if ($('btnFitChart')) $('btnFitChart').onclick = () => {
-      chartState.visibleBars = 80;
-      chartState.panOffset = 0;
-      chartState.autoFollow = true;
-      if ($('btnToggleFollow')) $('btnToggleFollow').classList.add('active');
-      draw();
-    };
-    if ($('btnToggleFollow')) $('btnToggleFollow').onclick = () => {
-      chartState.autoFollow = !chartState.autoFollow;
-      if (chartState.autoFollow) chartState.panOffset = 0;
-      $('btnToggleFollow').classList.toggle('active', chartState.autoFollow);
-      draw();
-    };
-    if ($('btnToggleVol')) $('btnToggleVol').onclick = () => {
-      chartState.showVolume = !chartState.showVolume;
-      $('btnToggleVol').classList.toggle('active', chartState.showVolume);
-      draw();
-    };
-    if ($('btnToggleTrades')) $('btnToggleTrades').onclick = () => {
-      chartState.showTrades = !chartState.showTrades;
-      $('btnToggleTrades').classList.toggle('active', chartState.showTrades);
-      draw();
-    };
-
-    c.addEventListener('wheel', e => {
-      e.preventDefault();
-      const zoomFactor = e.deltaY > 0 ? 1.15 : 0.87;
-      chartState.visibleBars = Math.max(chartState.minBars, Math.min(chartState.maxBars, Math.round(chartState.visibleBars * zoomFactor)));
-      draw();
-    }, { passive: false });
-
-    c.addEventListener('mousedown', e => {
-      chartState.isDragging = true;
-      chartState.dragStartX = e.clientX;
-      chartState.dragStartOffset = chartState.panOffset;
-    });
-
-    window.addEventListener('mouseup', () => {
-      chartState.isDragging = false;
-    });
-
-    c.addEventListener('mousemove', e => {
-      const rect = c.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-
-      if (chartState.isDragging) {
-        const dx = e.clientX - chartState.dragStartX;
-        const barWidth = (rect.width - 157) / Math.max(chartState.visibleBars, 1);
-        const shiftBars = Math.round(dx / Math.max(1, barWidth));
-        chartState.panOffset = Math.max(0, chartState.dragStartOffset + shiftBars);
-        chartState.autoFollow = false;
-        if ($('btnToggleFollow')) $('btnToggleFollow').classList.remove('active');
-      }
-
-      chartState.crosshair.active = true;
-      chartState.crosshair.x = mouseX;
-      chartState.crosshair.y = mouseY;
-      draw();
-    });
-
-    c.addEventListener('mouseleave', () => {
-      chartState.isDragging = false;
-      chartState.crosshair.active = false;
-      draw();
-    });
-
-    let touchStartDist = 0;
-    c.addEventListener('touchstart', e => {
-      if (e.touches.length === 1) {
-        chartState.isDragging = true;
-        chartState.dragStartX = e.touches[0].clientX;
-        chartState.dragStartOffset = chartState.panOffset;
-      } else if (e.touches.length === 2) {
-        chartState.isDragging = false;
-        touchStartDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      }
-    }, { passive: true });
-
-    c.addEventListener('touchmove', e => {
-      if (e.touches.length === 1 && chartState.isDragging) {
-        const dx = e.touches[0].clientX - chartState.dragStartX;
-        const rect = c.getBoundingClientRect();
-        const barWidth = (rect.width - 157) / Math.max(chartState.visibleBars, 1);
-        chartState.panOffset = Math.max(0, chartState.dragStartOffset + Math.round(dx / Math.max(1, barWidth)));
-        chartState.autoFollow = false;
-        if ($('btnToggleFollow')) $('btnToggleFollow').classList.remove('active');
-        draw();
-      } else if (e.touches.length === 2) {
-        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        if (touchStartDist > 0) {
-          const factor = touchStartDist / dist;
-          chartState.visibleBars = Math.max(chartState.minBars, Math.min(chartState.maxBars, Math.round(chartState.visibleBars * factor)));
-          touchStartDist = dist;
-          draw();
-        }
-      }
-    }, { passive: true });
-
-    c.addEventListener('touchend', () => {
-      chartState.isDragging = false;
-      touchStartDist = 0;
-    });
-  }
-
-  function updateLegendUI(bar, barIdx, totalBars){
-    if (!bar) return;
-    if ($('legSym')) $('legSym').textContent = activeSymbol;
-    if ($('legO')) $('legO').textContent = fmt(bar.o);
-    if ($('legH')) $('legH').textContent = fmt(bar.h);
-    if ($('legL')) $('legL').textContent = fmt(bar.l);
-    if ($('legC')) $('legC').textContent = fmt(bar.c);
-    if ($('legVol')) $('legVol').textContent = (bar.v || 0).toLocaleString('en-IN');
-    
-    const chg = bar.c - bar.o;
-    const pct = bar.o ? (chg / bar.o) * 100 : 0;
-    if ($('legChg')) {
-      $('legChg').textContent = `${chg >= 0 ? '+' : ''}${fmt(chg)} (${pct >= 0 ? '+' : ''}${fmt(pct)}%)`;
-      $('legChg').className = chg >= 0 ? 'green' : 'red';
-    }
-    if ($('legStatus')) {
-      $('legStatus').textContent = `Bar ${barIdx + 1}/${totalBars} · ${timeKey(bar.dt)}`;
-    }
-  }
-
   function draw(){
     const canvas = $('chart');
     if (!canvas) return;
@@ -1850,10 +1800,7 @@
     x.scale(dpr, dpr);
     const W = rect.width, H = rect.height;
     
-    const bgGrad = x.createLinearGradient(0, 0, 0, H);
-    bgGrad.addColorStop(0, '#0a1220');
-    bgGrad.addColorStop(1, '#060c16');
-    x.fillStyle = bgGrad;
+    x.fillStyle = '#FFFFFF';
     x.fillRect(0, 0, W, H);
     
     if (!sessionBars.length) return;
@@ -1865,196 +1812,204 @@
     const targetStart = Math.max(0, targetEnd - chartState.visibleBars + 1);
     const a = sessionBars.slice(targetStart, targetEnd + 1);
     
-    const left = 14, right = 145, top = 36, bottomTime = 28;
-    const volHeight = chartState.showVolume ? Math.min(90, Math.round(H * 0.18)) : 0;
-    const mainBottom = H - bottomTime - volHeight;
+    const left = 14, right = 60, top = 36, bottomTime = 28;
+    const showRSI = $('showRSI') && $('showRSI').checked;
+    
+    const volHeight = chartState.showVolume ? Math.round(H * 0.15) : 0;
+    const rsiHeight = showRSI ? Math.round(H * 0.18) : 0;
+    
+    const rsiBottom = H - bottomTime;
+    const volBottom = rsiBottom - rsiHeight;
+    const mainBottom = volBottom - volHeight;
 
     const orderedPending = pendingLevels.slice().sort((u,v) => c.dir === 'buy' ? v - u : u - v);
     const pendingToShow = orderedPending.slice(0, Math.min(5, c.maxLots));
     const targets = positions.map(p => p.side === 'buy' ? p.entry + c.square : p.entry - c.square);
-    const scalePrices = [...a.flatMap(b => [b.h, b.l]), ...positions.map(p => p.entry), ...targets, ...pendingToShow];
+    
+    let scalePrices = [...a.flatMap(b => [b.h, b.l]), ...positions.map(p => p.entry), ...targets, ...pendingToShow];
+    
+    const showMA = $('showMA') && $('showMA').checked;
+    const showST = $('showST') && $('showST').checked;
+    if (showMA) scalePrices.push(...a.map(b=>b.ma).filter(Boolean));
+    if (showST) scalePrices.push(...a.map(b=>b.st).filter(Boolean));
+
     let hi = Math.max(...scalePrices), lo = Math.min(...scalePrices);
-    const pad = (hi - lo || 1) * 0.12;
+    const pad = (hi - lo || 1) * 0.08;
     hi += pad; lo -= pad;
     
     const cw = (W - left - right) / Math.max(a.length, 1);
     const Y = p => top + (hi - p) / (hi - lo) * (mainBottom - top);
     const maxVol = Math.max(...a.map(b => b.v || 0), 1000);
-    const VolY = v => (H - bottomTime) - (v / maxVol) * (volHeight - 10);
+    const VolY = v => volBottom - (v / maxVol) * (volHeight - 10);
+    const RsiY = v => rsiBottom - (v / 100) * (rsiHeight - 10);
 
     // 1. Grid Lines & Axis
     x.font = '11px "JetBrains Mono", Consolas, monospace';
     x.lineWidth = 1;
     for (let i = 0; i < 5; i++) {
       const y = top + i * (mainBottom - top) / 4;
-      x.strokeStyle = 'rgba(29, 44, 68, 0.5)';
+      x.strokeStyle = '#E2E8F0';
       x.beginPath(); x.moveTo(left, y); x.lineTo(W - right, y); x.stroke();
       const p = hi - i * (hi - lo) / 4;
       x.fillStyle = '#64748b';
       x.fillText(fmt(p), W - right + 8, y + 4);
     }
 
+    // Dividers
     if (chartState.showVolume) {
-      x.strokeStyle = 'rgba(29, 44, 68, 0.4)';
-      x.beginPath(); x.moveTo(left, mainBottom); x.lineTo(W - right, mainBottom); x.stroke();
-      x.fillStyle = '#64748b';
-      x.font = '10px "JetBrains Mono", Consolas, monospace';
-      x.fillText('VOL', left + 4, mainBottom + 14);
-      x.fillText((maxVol).toLocaleString('en-IN'), W - right + 8, mainBottom + 14);
+      x.strokeStyle = '#CBD5E1'; x.beginPath(); x.moveTo(left, mainBottom); x.lineTo(W - right, mainBottom); x.stroke();
+      x.fillStyle = '#475569'; x.font = '10px "JetBrains Mono", monospace';
+      x.fillText('VOL', left + 4, mainBottom + 12);
+    }
+    if (showRSI) {
+      x.strokeStyle = '#CBD5E1'; x.beginPath(); x.moveTo(left, volBottom); x.lineTo(W - right, volBottom); x.stroke();
+      x.fillStyle = '#475569'; x.font = '10px "JetBrains Mono", monospace';
+      x.fillText('RSI', left + 4, volBottom + 12);
+      
+      x.strokeStyle = 'rgba(1, 83, 184, 0.2)'; x.setLineDash([4,4]);
+      x.beginPath(); x.moveTo(left, RsiY(70)); x.lineTo(W - right, RsiY(70)); x.stroke();
+      x.beginPath(); x.moveTo(left, RsiY(30)); x.lineTo(W - right, RsiY(30)); x.stroke();
+      x.setLineDash([]);
+      x.fillText('70', W - right + 8, RsiY(70) + 4);
+      x.fillText('30', W - right + 8, RsiY(30) + 4);
+    }
+
+    // Indicators (Background Layers)
+    if (showRSI) {
+      x.strokeStyle = '#0052cc'; x.lineWidth = 1.5; x.beginPath();
+      a.forEach((b, j) => {
+        const cx = left + j * cw + cw / 2;
+        j === 0 ? x.moveTo(cx, RsiY(b.rsi)) : x.lineTo(cx, RsiY(b.rsi));
+      });
+      x.stroke();
+    }
+
+    if (showST) {
+      a.forEach((b, j) => {
+        if (!b.st) return;
+        const cx = left + j * cw;
+        x.strokeStyle = b.stDir === 1 ? '#059669' : '#DC2626';
+        x.lineWidth = 2; x.beginPath();
+        x.moveTo(cx, Y(b.st)); x.lineTo(cx + cw, Y(b.st)); x.stroke();
+      });
+    }
+
+    if (showMA) {
+      x.strokeStyle = '#0153B8'; x.lineWidth = 1.5; x.beginPath();
+      a.forEach((b, j) => {
+        if (!b.ma) return;
+        const cx = left + j * cw + cw / 2;
+        j === 0 ? x.moveTo(cx, Y(b.ma)) : x.lineTo(cx, Y(b.ma));
+      });
+      x.stroke();
     }
 
     // 2. Volume Bars
     if (chartState.showVolume) {
       a.forEach((b, j) => {
         const cx = left + j * cw + cw / 2;
-        const up = b.c >= b.o;
-        x.fillStyle = up ? 'rgba(16, 185, 129, 0.42)' : 'rgba(244, 63, 94, 0.42)';
+        x.fillStyle = b.c >= b.o ? 'rgba(5, 150, 105, 0.25)' : 'rgba(220, 38, 38, 0.25)';
         const vy = VolY(b.v || 0);
-        const vh = Math.max(2, (H - bottomTime) - vy);
+        const vh = Math.max(2, volBottom - vy);
         x.fillRect(cx - Math.max(1, cw * 0.36), vy, Math.max(2, cw * 0.72), vh);
       });
     }
 
     // 3. Candlesticks
     a.forEach((b, j) => {
-      const cx = left + j * cw + cw / 2, up = b.c >= b.o;
-      const color = up ? '#10b981' : '#f43f5e';
-      x.strokeStyle = color;
-      x.fillStyle = color;
+      const cx = left + j * cw + cw / 2;
+      const color = b.c >= b.o ? '#059669' : '#DC2626';
+      x.strokeStyle = color; x.fillStyle = color;
       
-      x.beginPath();
-      x.moveTo(cx, Y(b.h));
-      x.lineTo(cx, Y(b.l));
-      x.stroke();
-      
+      x.beginPath(); x.moveTo(cx, Y(b.h)); x.lineTo(cx, Y(b.l)); x.stroke();
       const y = Math.min(Y(b.o), Y(b.c));
       const h = Math.max(2, Math.abs(Y(b.o) - Y(b.c)));
       const bw = Math.max(2, cw * 0.65);
-      x.fillRect(cx - bw / 2, y, bw, h);
+      if (b.c >= b.o) { x.fillStyle = '#FFFFFF'; x.fillRect(cx - bw / 2, y, bw, h); x.strokeRect(cx - bw / 2, y, bw, h); }
+      else { x.fillRect(cx - bw / 2, y, bw, h); }
     });
 
-    // 4. Time Axis Labels
+    // 4. Time Axis
     const labelCount = Math.min(6, a.length), used = new Set();
-    x.textAlign = 'center';
-    x.font = '11px "JetBrains Mono", Consolas, monospace';
+    x.textAlign = 'center'; x.font = '11px "JetBrains Mono", Consolas, monospace';
     for (let n = 0; n < labelCount; n++) {
       const j = Math.round(n * (a.length - 1) / Math.max(1, labelCount - 1));
-      if (used.has(j)) continue;
-      used.add(j);
+      if (used.has(j)) continue; used.add(j);
       const cx = left + j * cw + cw / 2, d = a[j].dt;
       const label = timeKey(d) === '00:00' ? `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}` : timeKey(d);
-      x.strokeStyle = 'rgba(29, 44, 68, 0.7)';
-      x.beginPath(); x.moveTo(cx, H - bottomTime); x.lineTo(cx, H - bottomTime + 5); x.stroke();
-      x.fillStyle = '#64748b';
-      x.fillText(label, cx, H - 10);
+      x.strokeStyle = '#E2E8F0'; x.beginPath(); x.moveTo(cx, H - bottomTime); x.lineTo(cx, H - bottomTime + 5); x.stroke();
+      x.fillStyle = '#64748b'; x.fillText(label, cx, H - 10);
     }
     x.textAlign = 'left';
 
-    // 5. Dynamic Ladder Overlay Lines
+    // 5. Ladder Lines
     const line = (price, color, dash, label) => {
       const y = Y(price);
       if (y < top - 20 || y > mainBottom + 20) return;
-      x.strokeStyle = color;
-      x.lineWidth = 1.5;
-      x.setLineDash(dash);
-      x.beginPath(); x.moveTo(left, y); x.lineTo(W - right, y); x.stroke();
-      x.setLineDash([]);
-      x.fillStyle = color;
-      x.font = 'bold 11px "Plus Jakarta Sans", sans-serif';
-      x.fillText(label, W - right + 8, y + 4);
+      x.strokeStyle = color; x.lineWidth = 1.5; x.setLineDash(dash);
+      x.beginPath(); x.moveTo(left, y); x.lineTo(W - right, y); x.stroke(); x.setLineDash([]);
+      x.fillStyle = color; x.font = 'bold 11px "Plus Jakarta Sans", sans-serif';
+      x.fillText(label, W - right + 6, y + 4);
     };
 
     for (const p of positions) {
       const target = p.side === 'buy' ? p.entry + c.square : p.entry - c.square;
-      line(p.entry, '#f59e0b', [6, 4], `${p.side === 'buy' ? 'BUY' : 'SHORT'} ${fmt(p.entry)} (${p.qty})`);
-      line(target, '#38bdf8', [3, 4], `TARGET ${fmt(target)}`);
+      line(p.entry, '#D97706', [6, 4], `${p.side === 'buy' ? 'BUY' : 'SHORT'} ${fmt(p.entry)} (${p.qty})`);
+      line(target, '#0153B8', [3, 4], `TARGET ${fmt(target)}`);
     }
-    pendingToShow.forEach((price, n) => line(price, n === 0 ? '#10b981' : '#047857', n === 0 ? [6, 4] : [2, 4], `${n === 0 ? 'NEXT ' : ''}${c.dir === 'buy' ? 'BUY' : 'SHORT'} ${fmt(price)}`));
-    if (positions.length) {
-      x.fillStyle = '#f59e0b';
-      x.font = 'bold 11px "Plus Jakarta Sans", sans-serif';
-      x.fillText('AVG ' + fmt(avgPrice()), left + 6, Y(avgPrice()) - 6);
-    }
+    pendingToShow.forEach((price, n) => line(price, n === 0 ? '#059669' : '#047857', n === 0 ? [6, 4] : [2, 4], `${n === 0 ? 'NEXT ' : ''}${c.dir === 'buy' ? 'BUY' : 'SHORT'} ${fmt(price)}`));
+    if (positions.length) { x.fillStyle = '#D97706'; x.font = 'bold 11px "Plus Jakarta Sans", sans-serif'; x.fillText('AVG ' + fmt(avgPrice()), left + 6, Y(avgPrice()) - 6); }
 
-    // 6. Trade Markers / Executions on Chart
+    // 6. Minimal Trade Markers (Cleaned up!)
     if (chartState.showTrades && trades.length) {
       trades.forEach(t => {
         const entryIdx = a.findIndex(b => b.dt.getTime() === t.entryTime.getTime());
         if (entryIdx >= 0) {
-          const bar = a[entryIdx];
-          const cx = left + entryIdx * cw + cw / 2;
-          const isBuy = t.side === 'buy';
-          const arrowY = isBuy ? Y(bar.l) + 14 : Y(bar.h) - 14;
-          x.fillStyle = isBuy ? '#10b981' : '#f43f5e';
-          x.font = '12px "Plus Jakarta Sans", sans-serif';
-          x.textAlign = 'center';
-          x.fillText(isBuy ? '▲' : '▼', cx, arrowY);
+          const bar = a[entryIdx], cx = left + entryIdx * cw + cw / 2, isBuy = t.side === 'buy';
+          const arrowY = isBuy ? Y(bar.l) + 10 : Y(bar.h) - 10;
+          x.fillStyle = isBuy ? '#059669' : '#DC2626'; x.font = '10px Arial';
+          x.textAlign = 'center'; x.fillText(isBuy ? '▲' : '▼', cx, arrowY);
         }
-
         const exitIdx = a.findIndex(b => b.dt.getTime() === t.exitTime.getTime());
         if (exitIdx >= 0) {
-          const bar = a[exitIdx];
-          const cx = left + exitIdx * cw + cw / 2;
-          const exitY = Y(t.exit);
-          const isWin = t.net >= 0;
-          x.fillStyle = isWin ? 'rgba(16, 185, 129, 0.9)' : 'rgba(244, 63, 94, 0.9)';
-          x.fillRect(cx - 24, exitY - 10, 48, 18);
-          x.fillStyle = '#ffffff';
-          x.font = 'bold 10px "JetBrains Mono", monospace';
-          x.textAlign = 'center';
-          x.fillText(`${isWin ? '+' : ''}${Math.round(t.net)}`, cx, exitY + 4);
+          const cx = left + exitIdx * cw + cw / 2, exitY = Y(t.exit), isWin = t.net >= 0;
+          
+          x.beginPath();
+          x.arc(cx, exitY, 4, 0, 2*Math.PI);
+          x.fillStyle = isWin ? '#059669' : '#DC2626';
+          x.fill();
+          x.strokeStyle = '#FFFFFF';
+          x.lineWidth = 1.5;
+          x.stroke();
         }
       });
       x.textAlign = 'left';
     }
 
     // 7. Interactive Crosshair & Tooltip
-    let activeBar = a.at(-1);
-    let activeBarIdx = targetEnd;
+    let activeBar = a.at(-1), activeBarIdx = targetEnd;
     if (chartState.crosshair.active && chartState.crosshair.x >= left && chartState.crosshair.x <= W - right) {
       const relX = chartState.crosshair.x - left;
       const hoveredIndexInA = Math.min(a.length - 1, Math.max(0, Math.floor(relX / cw)));
-      activeBar = a[hoveredIndexInA];
-      activeBarIdx = targetStart + hoveredIndexInA;
+      activeBar = a[hoveredIndexInA]; activeBarIdx = targetStart + hoveredIndexInA;
 
-      const snapX = left + hoveredIndexInA * cw + cw / 2;
-      const snapY = chartState.crosshair.y;
+      const snapX = left + hoveredIndexInA * cw + cw / 2, snapY = chartState.crosshair.y;
       const hoverPrice = hi - (snapY - top) / (mainBottom - top) * (hi - lo);
 
-      x.strokeStyle = 'rgba(100, 116, 139, 0.5)';
-      x.setLineDash([4, 4]);
+      x.strokeStyle = '#94A3B8'; x.setLineDash([4, 4]);
       x.beginPath(); x.moveTo(snapX, top); x.lineTo(snapX, H - bottomTime); x.stroke();
 
       if (snapY >= top && snapY <= mainBottom) {
         x.beginPath(); x.moveTo(left, snapY); x.lineTo(W - right, snapY); x.stroke();
-
-        x.setLineDash([]);
-        x.fillStyle = '#1e293b';
-        x.fillRect(W - right + 2, snapY - 10, right - 6, 20);
-        x.strokeStyle = '#38bdf8';
-        x.strokeRect(W - right + 2, snapY - 10, right - 6, 20);
-        x.fillStyle = '#ffffff';
-        x.font = 'bold 11px "JetBrains Mono", monospace';
-        x.fillText(fmt(hoverPrice), W - right + 10, snapY + 4);
+        x.setLineDash([]); x.fillStyle = '#0F172A'; x.fillRect(W - right, snapY - 10, right, 20);
+        x.fillStyle = '#FFFFFF'; x.font = 'bold 11px "JetBrains Mono", monospace'; x.fillText(fmt(hoverPrice), W - right + 6, snapY + 4);
       }
-
-      x.setLineDash([]);
-      x.fillStyle = '#1e293b';
-      x.fillRect(snapX - 35, H - bottomTime + 2, 70, 18);
-      x.strokeStyle = '#38bdf8';
-      x.strokeRect(snapX - 35, H - bottomTime + 2, 70, 18);
-      x.fillStyle = '#ffffff';
-      x.font = 'bold 10px "JetBrains Mono", monospace';
-      x.textAlign = 'center';
-      x.fillText(timeKey(activeBar.dt), snapX, H - bottomTime + 15);
-      x.textAlign = 'left';
+      x.setLineDash([]); x.fillStyle = '#0F172A'; x.fillRect(snapX - 35, H - bottomTime + 2, 70, 18);
+      x.fillStyle = '#FFFFFF'; x.font = 'bold 10px "JetBrains Mono", monospace'; x.textAlign = 'center'; x.fillText(timeKey(activeBar.dt), snapX, H - bottomTime + 15); x.textAlign = 'left';
     }
 
-    if (activeBar) {
-      updateLegendUI(activeBar, activeBarIdx, sessionBars.length);
-    }
+    if (activeBar) updateLegendUI(activeBar, activeBarIdx, sessionBars.length);
   }
-
   function drawEquity(){
     const canvas = $('equityChart');
     if (!canvas) return;
@@ -2065,7 +2020,7 @@
     x.scale(dpr, dpr);
     const W = rect.width, H = rect.height;
     
-    x.fillStyle = '#08101d';
+    x.fillStyle = '#FFFFFF';
     x.fillRect(0, 0, W, H);
     if (!equityHistory.length) {
       x.fillStyle = '#64748b';
@@ -2079,7 +2034,7 @@
     const Y = v => top + (hi + pad - v) / (hi - lo + 2 * pad) * (H - top - bottom);
     const X = i => left + i * (W - left - right) / Math.max(1, a.length - 1);
     
-    x.strokeStyle = 'rgba(29, 44, 68, 0.6)';
+    x.strokeStyle = 'rgba(226, 232, 240, 0.8)';
     x.lineWidth = 1;
     x.font = '10px "JetBrains Mono", monospace';
     for (let i = 0; i < 5; i++) {
@@ -2100,13 +2055,13 @@
       });
       x.stroke();
     };
-    line('grot', '#10b981');
-    line('one', '#38bdf8');
+    line('grot', '#059669');
+    line('one', '#0153B8');
     
-    x.fillStyle = '#10b981'; x.fillRect(left, 7, 14, 3);
-    x.font = '11px "Plus Jakarta Sans", sans-serif'; x.fillStyle = '#f8fafc'; x.fillText('GROT Total', left + 20, 12);
-    x.fillStyle = '#38bdf8'; x.fillRect(left + 100, 7, 14, 3);
-    x.fillStyle = '#f8fafc'; x.fillText('One-Time Hold', left + 120, 12);
+    x.fillStyle = '#059669'; x.fillRect(left, 7, 14, 3);
+    x.font = '11px "Plus Jakarta Sans", sans-serif'; x.fillStyle = '#0F172A'; x.fillText('GROT Total', left + 20, 12);
+    x.fillStyle = '#0153B8'; x.fillRect(left + 100, 7, 14, 3);
+    x.fillStyle = '#0F172A'; x.fillText('One-Time Hold', left + 120, 12);
     
     const labels = Math.min(5, a.length);
     x.fillStyle = '#64748b';
@@ -2157,8 +2112,7 @@
   }
   
   initChartControls();
-  setInterval(() => { refreshNextTriggers(); refreshOpenOrders(); }, 250);
-  window.addEventListener('resize', () => { draw(); drawEquity(); });
+  window.addEventListener('resize', () => { needsRender = true; });
 })();
 </script>
 </body>
