@@ -2016,7 +2016,7 @@
       });
     }
 
-    // 3. Candlesticks
+    // 3. Candlesticks (Solid bodies, no hollows)
     a.forEach((b, j) => {
       const cx = left + j * cw + cw / 2;
       const color = b.c >= b.o ? '#059669' : '#DC2626';
@@ -2026,8 +2026,9 @@
       const y = Math.min(Y(b.o), Y(b.c));
       const h = Math.max(2, Math.abs(Y(b.o) - Y(b.c)));
       const bw = Math.max(2, cw * 0.65);
-      if (b.c >= b.o) { x.fillStyle = '#FFFFFF'; x.fillRect(cx - bw / 2, y, bw, h); x.strokeRect(cx - bw / 2, y, bw, h); }
-      else { x.fillRect(cx - bw / 2, y, bw, h); }
+      
+      // Draw solid filled body for both green and red
+      x.fillRect(cx - bw / 2, y, bw, h);
     });
 
     // 4. Time Axis
@@ -2061,13 +2062,13 @@
     pendingToShow.forEach((price, n) => line(price, n === 0 ? '#059669' : '#047857', n === 0 ? [6, 4] : [2, 4], `${n === 0 ? 'NEXT ' : ''}${c.dir === 'buy' ? 'BUY' : 'SHORT'} ${fmt(price)}`));
     if (positions.length) { x.fillStyle = '#D97706'; x.font = 'bold 11px "Plus Jakarta Sans", sans-serif'; x.fillText('AVG ' + fmt(avgPrice()), left + 6, Y(avgPrice()) - 6); }
 
-    // 6. Minimal Trade Markers (Cleaned up!)
+    // 6. Trade Markers (Cleaned up Badge Style)
     if (chartState.showTrades && trades.length) {
       trades.forEach(t => {
         const entryIdx = a.findIndex(b => b.dt.getTime() === t.entryTime.getTime());
         if (entryIdx >= 0) {
           const bar = a[entryIdx], cx = left + entryIdx * cw + cw / 2, isBuy = t.side === 'buy';
-          const arrowY = isBuy ? Y(bar.l) + 10 : Y(bar.h) - 10;
+          const arrowY = isBuy ? Y(bar.l) + 12 : Y(bar.h) - 12;
           x.fillStyle = isBuy ? '#059669' : '#DC2626'; x.font = '10px Arial';
           x.textAlign = 'center'; x.fillText(isBuy ? '▲' : '▼', cx, arrowY);
         }
@@ -2075,13 +2076,21 @@
         if (exitIdx >= 0) {
           const cx = left + exitIdx * cw + cw / 2, exitY = Y(t.exit), isWin = t.net >= 0;
           
-          x.beginPath();
-          x.arc(cx, exitY, 4, 0, 2*Math.PI);
           x.fillStyle = isWin ? '#059669' : '#DC2626';
+          
+          // Draw a small dot on the exact exit price
+          x.beginPath();
+          x.arc(cx, exitY, 3, 0, 2*Math.PI);
           x.fill();
-          x.strokeStyle = '#FFFFFF';
-          x.lineWidth = 1.5;
-          x.stroke();
+          
+          // Draw the badge slightly offset to the right so it doesn't break the candle wicks
+          x.fillStyle = isWin ? 'rgba(5, 150, 105, 0.92)' : 'rgba(220, 38, 38, 0.92)';
+          x.fillRect(cx + 6, exitY - 9, 36, 18);
+          
+          x.fillStyle = '#FFFFFF';
+          x.font = 'bold 10px "JetBrains Mono", monospace';
+          x.textAlign = 'center';
+          x.fillText(`${Math.round(t.net)}`, cx + 24, exitY + 4);
         }
       });
       x.textAlign = 'left';
