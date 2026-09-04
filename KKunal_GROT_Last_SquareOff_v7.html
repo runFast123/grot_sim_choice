@@ -1790,6 +1790,107 @@
     dragStartOffset: 0,
     crosshair: { active: false, x: 0, y: 0, price: null }
   };
+
+  function initChartControls(){
+    const c = $('chart');
+    if (!c) return;
+
+    if ($('btnZoomIn')) $('btnZoomIn').onclick = () => {
+      chartState.visibleBars = Math.max(chartState.minBars, Math.round(chartState.visibleBars * 0.75));
+      needsRender = true;
+    };
+    if ($('btnZoomOut')) $('btnZoomOut').onclick = () => {
+      chartState.visibleBars = Math.min(chartState.maxBars, Math.round(chartState.visibleBars * 1.33));
+      needsRender = true;
+    };
+    if ($('btnFitChart')) $('btnFitChart').onclick = () => {
+      chartState.visibleBars = 80;
+      chartState.panOffset = 0;
+      chartState.autoFollow = true;
+      if ($('btnToggleFollow')) $('btnToggleFollow').classList.add('active');
+      needsRender = true;
+    };
+    if ($('btnToggleFollow')) $('btnToggleFollow').onclick = () => {
+      chartState.autoFollow = !chartState.autoFollow;
+      if (chartState.autoFollow) chartState.panOffset = 0;
+      $('btnToggleFollow').classList.toggle('active', chartState.autoFollow);
+      needsRender = true;
+    };
+    if ($('btnToggleVol')) $('btnToggleVol').onclick = () => {
+      chartState.showVolume = !chartState.showVolume;
+      $('btnToggleVol').classList.toggle('active', chartState.showVolume);
+      needsRender = true;
+    };
+    if ($('btnToggleTrades')) $('btnToggleTrades').onclick = () => {
+      chartState.showTrades = !chartState.showTrades;
+      $('btnToggleTrades').classList.toggle('active', chartState.showTrades);
+      needsRender = true;
+    };
+
+    c.addEventListener('wheel', e => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY > 0 ? 1.15 : 0.87;
+      chartState.visibleBars = Math.max(chartState.minBars, Math.min(chartState.maxBars, Math.round(chartState.visibleBars * zoomFactor)));
+      needsRender = true;
+    }, { passive: false });
+
+    c.addEventListener('mousedown', e => {
+      chartState.isDragging = true;
+      chartState.dragStartX = e.clientX;
+      chartState.dragStartOffset = chartState.panOffset;
+    });
+
+    window.addEventListener('mouseup', () => {
+      chartState.isDragging = false;
+    });
+
+    c.addEventListener('mousemove', e => {
+      const rect = c.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      if (chartState.isDragging) {
+        const dx = e.clientX - chartState.dragStartX;
+        const barWidth = (rect.width - 157) / Math.max(chartState.visibleBars, 1);
+        const shiftBars = Math.round(dx / Math.max(1, barWidth));
+        chartState.panOffset = Math.max(0, chartState.dragStartOffset + shiftBars);
+        chartState.autoFollow = false;
+        if ($('btnToggleFollow')) $('btnToggleFollow').classList.remove('active');
+      }
+
+      chartState.crosshair.active = true;
+      chartState.crosshair.x = mouseX;
+      chartState.crosshair.y = mouseY;
+      needsRender = true;
+    });
+
+    c.addEventListener('mouseleave', () => {
+      chartState.isDragging = false;
+      chartState.crosshair.active = false;
+      needsRender = true;
+    });
+  }
+
+  function updateLegendUI(bar, barIdx, totalBars){
+    if (!bar) return;
+    if ($('legSym')) $('legSym').textContent = $('symbolInput') ? $('symbolInput').value : 'NIFTY';
+    if ($('legO')) $('legO').textContent = fmt(bar.o);
+    if ($('legH')) $('legH').textContent = fmt(bar.h);
+    if ($('legL')) $('legL').textContent = fmt(bar.l);
+    if ($('legC')) $('legC').textContent = fmt(bar.c);
+    if ($('legVol')) $('legVol').textContent = (bar.v || 0).toLocaleString('en-IN');
+    
+    const chg = bar.c - bar.o;
+    const pct = bar.o ? (chg / bar.o) * 100 : 0;
+    if ($('legChg')) {
+      $('legChg').textContent = `${chg >= 0 ? '+' : ''}${fmt(chg)} (${pct >= 0 ? '+' : ''}${fmt(pct)}%)`;
+      $('legChg').className = chg >= 0 ? 'green' : 'red';
+    }
+    if ($('legStatus')) {
+      $('legStatus').textContent = `Bar ${barIdx + 1}/${totalBars}`;
+    }
+  }
+
   function draw(){
     const canvas = $('chart');
     if (!canvas) return;
