@@ -24,6 +24,50 @@ CORS(app)
 SESSION_FILE = os.path.join(BASE_DIR, ".choice_session.json")
 DEFAULT_BASE_URL = BASE_URL_OMNE
 
+import json
+import stat
+
+SECRETS_FILE = os.path.join(BASE_DIR, "secrets.json")
+
+def load_secrets():
+    secrets = {}
+    if os.path.exists(SECRETS_FILE):
+        try:
+            with open(SECRETS_FILE, "r") as f:
+                secrets = json.load(f)
+        except Exception as e:
+            print("Error reading secrets.json:", e)
+    
+    # Push secrets into os.environ if not already present
+    if "vendor_id" in secrets and not os.environ.get("CHOICE_VENDOR_ID"):
+        os.environ["CHOICE_VENDOR_ID"] = secrets["vendor_id"]
+    if "api_key" in secrets and not os.environ.get("CHOICE_API_KEY"):
+        os.environ["CHOICE_API_KEY"] = secrets["api_key"]
+    if "mobile_no" in secrets and not os.environ.get("CHOICE_MOBILE"):
+        os.environ["CHOICE_MOBILE"] = secrets["mobile_no"]
+    if "base_url" in secrets and not os.environ.get("CHOICE_BASE_URL"):
+        os.environ["CHOICE_BASE_URL"] = secrets["base_url"]
+
+def save_secrets(vendor_id, api_key, mobile_no, base_url):
+    secrets = {
+        "vendor_id": vendor_id,
+        "api_key": api_key,
+        "mobile_no": mobile_no,
+        "base_url": base_url or DEFAULT_BASE_URL
+    }
+    with open(SECRETS_FILE, "w") as f:
+        json.dump(secrets, f, indent=4)
+    # Set tight permissions (0600)
+    try:
+        os.chmod(SECRETS_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception:
+        pass
+    
+    load_secrets()
+
+# Call load secrets once at startup
+load_secrets()
+
 # In-memory session store & client
 scrip_master = None
 choice_client = None
@@ -66,36 +110,22 @@ def encode_mobile(mobile_no: str) -> str:
 
 def extract_credentials(req_data=None, req_obj=None):
     """
-    Extracts Choice credentials from multiple sources:
-    1. Request JSON payload
-    2. Request HTTP headers (X-Vendor-Id, X-Api-Key, X-Session-Id, etc.)
-    3. Environment variables (CHOICE_VENDOR_ID, CHOICE_API_KEY, etc.)
-    4. In-memory auth_state & session file fallback
+    Extracts Choice credentials STRICTLY from Server Side (os.environ / secrets.json) 
+    and session state. The client browser is no longer trusted to send API Keys or Mobile numbers.
     """
     data = req_data or {}
     headers = req_obj.headers if req_obj else {}
 
-    vendor_id = (
-        data.get("vendor_id")
-        or headers.get("X-Vendor-Id")
-        or headers.get("VendorId")
-        or os.environ.get("CHOICE_VENDOR_ID", "")
-        or auth_state.get("vendor_id", "")
-    )
+    # Read strictly from environment (populated by secrets.json) or server auth state
+    vendor_id = os.environ.get("CHOICE_VENDOR_ID") or auth_state.get("vendor_id", "")
     if vendor_id:
         vendor_id = str(vendor_id).strip()
 
-    api_key = (
-        data.get("api_key")
-        or headers.get("X-Api-Key")
-        or headers.get("X-Bearer")
-        or headers.get("Bearer")
-        or os.environ.get("CHOICE_API_KEY", "")
-        or auth_state.get("api_key", "")
-    )
+    api_key = os.environ.get("CHOICE_API_KEY") or auth_state.get("api_key", "")
     if api_key:
         api_key = str(api_key).strip()
 
+    # Session ID can still be accepted from the client (acts as a standard session token)
     session_id = (
         data.get("session_id")
         or headers.get("X-Session-Id")
@@ -106,36 +136,18 @@ def extract_credentials(req_data=None, req_obj=None):
         auth_hdr = headers.get("Authorization", "").strip()
         if auth_hdr.lower().startswith("sessionid "):
             session_id = auth_hdr[10:].strip()
-        elif auth_hdr.lower().startswith("bearer "):
-            if not api_key:
-                api_key = auth_hdr[7:].strip()
         else:
             session_id = auth_hdr
     if session_id:
         session_id = str(session_id).strip()
 
-    access_token = (
-        data.get("access_token")
-        or headers.get("X-Access-Token")
-        or auth_state.get("access_token", "")
-        or api_key
-    )
+    access_token = auth_state.get("access_token", "") or api_key
 
-    mobile_no = (
-        data.get("mobile_no")
-        or headers.get("X-Mobile-No")
-        or os.environ.get("CHOICE_MOBILE", "")
-        or auth_state.get("mobile_no", "")
-    )
+    mobile_no = os.environ.get("CHOICE_MOBILE") or auth_state.get("mobile_no", "")
     if mobile_no:
         mobile_no = str(mobile_no).strip()
 
-    base_url = (
-        data.get("base_url")
-        or headers.get("X-Base-Url")
-        or os.environ.get("CHOICE_BASE_URL", "")
-        or auth_state.get("base_url", DEFAULT_BASE_URL)
-    )
+    base_url = os.environ.get("CHOICE_BASE_URL") or auth_state.get("base_url", DEFAULT_BASE_URL)
     base_url = str(base_url).strip().rstrip("/") if base_url else DEFAULT_BASE_URL
 
     return {
@@ -243,6 +255,107 @@ def load_scrip_master_async():
             print(f"Background: Scrip Master fetch warning: {e}")
 
 threading.Thread(target=load_scrip_master_async, daemon=True).start()
+
+
+@app.route("/admin/bootstrap", methods=["GET", "POST"])
+def admin_bootstrap():
+    # Only allow localhost for security
+    if request.remote_addr not in ("127.0.0.1", "localhost", "::1"):
+        return jsonify({"status": "error", "message": "Access denied. Only localhost can bootstrap secrets."}), 403
+
+    if request.method == "POST":
+        data = request.get_json() or {}
+        vendor_id = data.get("vendor_id", "").strip()
+        api_key = data.get("api_key", "").strip()
+        mobile_no = data.get("mobile_no", "").strip()
+        base_url = data.get("base_url", "").strip()
+
+        if not vendor_id or not api_key or not mobile_no:
+            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+
+        save_secrets(vendor_id, api_key, mobile_no, base_url)
+        return jsonify({"status": "success", "message": "Secrets saved successfully and loaded into environment."})
+
+    # Render a simple HTML form for bootstrap
+    html = '''
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>GROT Secrets Bootstrap</title>
+      <style>
+        body { background: #0f172a; color: #f8fafc; font-family: sans-serif; padding: 40px; display: flex; justify-content: center; }
+        .card { background: #1e293b; padding: 30px; border-radius: 12px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h2 { margin-top: 0; color: #38bdf8; }
+        label { display: block; margin-top: 15px; font-size: 12px; color: #94a3b8; font-weight: bold; }
+        input, select { width: 100%; padding: 10px; margin-top: 5px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 6px; box-sizing: border-box; }
+        button { margin-top: 20px; width: 100%; padding: 12px; background: #059669; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        button:hover { background: #047857; }
+        .note { font-size: 11px; color: #64748b; margin-top: 15px; text-align: center; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h2>Choice API Credentials</h2>
+        <p style="font-size:13px; color:#cbd5e1; line-height: 1.5">Securely store your Choice API credentials server-side. This form is only accessible from localhost.</p>
+        
+        <label>API Gateway</label>
+        <select id="base_url">
+          <option value="https://finxomne.choiceindia.com">OMNE (finxomne)</option>
+          <option value="https://finx.choiceindia.com">FINX (finx)</option>
+        </select>
+
+        <label>Vendor ID</label>
+        <input type="text" id="vendor_id" placeholder="X123456" />
+
+        <label>API Key (Bearer Token)</label>
+        <input type="password" id="api_key" placeholder="eyJhbGciOi..." />
+
+        <label>Registered Mobile</label>
+        <input type="text" id="mobile_no" placeholder="10-digit mobile" />
+
+        <button onclick="saveSecrets()">Save to secrets.json</button>
+        <div id="status" class="note"></div>
+      </div>
+      <script>
+        async function saveSecrets() {
+          const btn = document.querySelector('button');
+          btn.disabled = true;
+          const status = document.getElementById('status');
+          status.textContent = "Saving...";
+          
+          const payload = {
+            base_url: document.getElementById('base_url').value,
+            vendor_id: document.getElementById('vendor_id').value,
+            api_key: document.getElementById('api_key').value,
+            mobile_no: document.getElementById('mobile_no').value
+          };
+          
+          try {
+            const res = await fetch('/admin/bootstrap', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            status.textContent = data.message;
+            if (data.status === 'success') {
+              status.style.color = '#10b981';
+              setTimeout(() => { window.location.href = "/"; }, 1500);
+            } else {
+              status.style.color = '#ef4444';
+            }
+          } catch(e) {
+            status.textContent = e.message;
+            status.style.color = '#ef4444';
+          }
+          btn.disabled = false;
+        }
+      </script>
+    </body>
+    </html>
+    '''
+    return html
 
 @app.route("/")
 def serve_index():
@@ -585,16 +698,27 @@ def auth_manual():
 
 @app.route("/api/scrip/search", methods=["GET"])
 def search_scrip():
-    """Fuzzy search scrips across master or fallback list"""
-    query = request.args.get("query", "").strip().lower()
+    """Fuzzy search scrips across master (Supports Names & Tokens)"""
+    query = request.args.get("query", "").strip().upper()
     segment = request.args.get("segment", "").strip()
 
     results = []
     
-    # 1. Search dynamically from Choice ScripMaster if loaded
+    # 1. Search dynamically from Choice ScripMaster
     if scrip_master and scrip_master.is_loaded and query:
-        matches = scrip_master.search(query)
-        for m in matches[:30]:
+        matches = []
+        for row in scrip_master.all_rows:
+            d_symbol = row.get('Symbol', '').strip().upper()
+            d_sec_desc = row.get('SecDesc', '').strip().upper()
+            d_token = row.get('Token', '').strip()
+            
+            # Allow searching by exact token number, or substring of symbol/description
+            if query in d_symbol or query in d_sec_desc or query == d_token or query in d_token:
+                matches.append(row)
+                if len(matches) >= 30: # Limit to top 30 results for speed
+                    break
+
+        for m in matches:
             try:
                 results.append({
                     "symbol": m.get("Symbol"),
@@ -610,10 +734,11 @@ def search_scrip():
 
     # 2. Add / fallback to preset scrips
     if not results:
+        query_lower = query.lower()
         for s in DEFAULT_SCRIPS:
             if segment and str(s.get("segment_id")) != segment:
                 continue
-            if not query or query in s["symbol"].lower() or query in s["name"].lower():
+            if not query_lower or query_lower in s["symbol"].lower() or query_lower in s["name"].lower() or query_lower in str(s["token"]):
                 results.append(s)
 
     return jsonify({

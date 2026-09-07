@@ -9,3 +9,7 @@ node_modules/
 .DS_Store
 *_guide_text.txt
 test_gateways.py
+
+secrets.json
+.choice_session.json
+*.log
