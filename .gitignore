@@ -1,15 +1,28 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
 *.pyo
-.choice_session.json
-.env
-.vercel/
-node_modules/
-.DS_Store
-*_guide_text.txt
-test_gateways.py
 
+# Secrets & session state (never commit)
+.env
 secrets.json
 .choice_session.json
+
+# Runtime output
 *.log
+
+# Editor / tooling
+.vscode/
+.idea/
+.DS_Store
+node_modules/
+.vercel/
+
+# Local vendor reference material and SDK source drop
+*.pdf
+*_guide_text.txt
+kkunal-*.tar.gz
+
+# Ad-hoc local probes
+test_gateways.py

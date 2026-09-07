@@ -354,7 +354,7 @@
     <div class="section">
       <div class="section-title">2 · GROT ladder <span class="section-kicker">Entries chase the last square-off</span></div>
       <div class="row"><div><label for="direction">Direction</label><select id="direction"><option value="buy">Buy</option><option value="short">Short</option></select></div><div><label for="startTime">Start time</label><input id="startTime" type="time" value="09:30"></div></div>
-      <div class="row"><div><label for="endTime">Square-off time</label><input id="endTime" type="time" value="15:15"></div><div><label for="speed">Replay speed</label><select id="speed"><option value="1200">1×</option><option value="600">2×</option><option value="250" selected>5×</option><option value="100">10×</option></select></div></div>
+      <div class="row"><div><label for="endTime">Square-off time</label><input id="endTime" type="time" value="15:15"></div><div><label for="speed">Replay speed</label><select id="speed"><option value="1200">1×</option><option value="600">2×</option><option value="250" selected>5×</option><option value="100">10×</option><option value="20">50×</option></select></div></div>
       <div class="row"><div><label for="startPrice">Start price</label><input id="startPrice" type="number" min="0" step="0.05" value="0"></div><div><label for="priceSource">Price source</label><select id="priceSource"><option value="market">Market at start</option><option value="custom">Use start price</option></select></div></div>
       <div class="row"><div><label for="gridStep">Grid step</label><input id="gridStep" type="number" min="0.01" step="0.05" value="5"></div><div><label for="squarePoints">Square-off points</label><input id="squarePoints" type="number" min="0.01" step="0.05" value="5"></div></div>
       <div class="note">After every square-off, the next entry chases the exit: Buy = Exit − Step; Short = Exit + Step.</div>
@@ -500,22 +500,26 @@
     <p class="modal-lead">Credentials are securely managed on the server. If they are missing, bootstrap them via the admin route.</p>
 
     <div id="authStep1">
-      <div style="margin-top:14px;padding:12px;background:#0b1422;border:1px solid var(--border);border-radius:10px; text-align: center;">
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Click below to securely fetch the TOTP from Choice API and complete 1-click login.</p>
-        <button class="primary" id="autoLoginBtn" onclick="autoLogin()" style="width:100%; padding: 12px;">1-Click Login</button>
+      <div style="margin-top:14px;padding:12px;background:var(--bg-inner);border:1px solid var(--border);border-radius:10px;text-align:center">
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">Click below to securely fetch the TOTP from Choice API and complete 1-click login.</p>
+        <button class="primary" id="autoLoginBtn" onclick="autoLogin()" style="width:100%;padding:12px">1-Click Login</button>
+        <div id="modalAuthMsg" style="margin-top:10px;font-size:11.5px;color:var(--text-dim)"></div>
       </div>
 
-      <div style="margin-top:14px;padding:10px;background:#0b1422;border:1px solid var(--border);border-radius:8px;font-size:11px">
+      <div style="margin-top:14px;padding:10px;background:var(--bg-inner);border:1px solid var(--border);border-radius:8px;font-size:11px">
         <div style="display:flex;justify-content:space-between;color:var(--yellow);font-weight:700;margin-bottom:4px;gap:8px">
-          <span>Server Setup</span>
+          <span>Server setup</span>
+          <span id="modalDetectedIp" style="color:var(--text-dim);font-weight:600">Detecting IP…</span>
         </div>
         <div style="color:var(--text-muted);line-height:1.4">
-          Need to update your API Key or Vendor ID? <a href="/admin/bootstrap" style="color:var(--blue);text-decoration:underline;">Configure server secrets</a>
+          Need to set or update your API Key, Client ID or mobile number?
+          <a href="/admin/bootstrap" style="color:var(--blue);text-decoration:underline">Configure server secrets</a>.
+          Choice rejects market-data calls with <b>401</b> unless the IP above is registered as the static IP on that API key.
         </div>
       </div>
     </div>
   </div>
-</div>>
+</div>
 
 <script>
 (() => {
@@ -552,9 +556,12 @@
     </ol>
   </div>`;
 
+  function setToolbarEnabled(enabled) {
+    document.querySelectorAll('.chart-toolbar button').forEach(b => { b.disabled = !enabled; });
+  }
+
   function showEmpty(message) {
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=true);
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=true);
+    setToolbarEnabled(false);
     const el = $('empty');
     if(!el) return;
     el.style.display = 'grid';
@@ -590,7 +597,7 @@
     if(connected) {
       badge.textContent = 'Choice: ' + label;
       badge.className = 'api-badge connected';
-      if(side) side.innerHTML = `<span style="color:var(--green);font-weight:700">${label}</span> <span style="color:var(--muted);font-weight:600">· session saved</span>`;
+      if(side) side.innerHTML = `<span style="color:var(--green);font-weight:700">${label}</span> <span style="color:var(--text-dim);font-weight:600">· session saved</span>`;
       if(sideBtn) {
         sideBtn.textContent = 'Manage';
         sideBtn.className = '';
@@ -612,20 +619,19 @@
 
   // Public IP detection for diagnostics
   async function detectClientIp() {
+    const el = $('modalDetectedIp');
+    if(!el) return;
     try {
-      const el = $('modalDetectedIp');
-      if(!el) return;
       const res = await fetch('/api/client_ip');
       const data = await res.json();
-      if(data.ip) {
-        el.textContent = 'Detected IP: ' + data.ip;
-      }
-    } catch(e) {
-      try {
-        const res2 = await fetch('https://api.ipify.org?format=json');
-        const data2 = await res2.json();
-        if(data2.ip) $('modalDetectedIp').textContent = 'Detected IP: ' + data2.ip;
-      } catch(e2) {}
+      if(data.ip) { el.textContent = 'IP ' + data.ip; return; }
+    } catch(e) { /* backend unreachable, fall through to public lookup */ }
+    try {
+      const res2 = await fetch('https://api.ipify.org?format=json');
+      const data2 = await res2.json();
+      el.textContent = data2.ip ? 'IP ' + data2.ip : 'IP unavailable';
+    } catch(e2) {
+      el.textContent = 'IP unavailable';
     }
   }
 
@@ -638,7 +644,6 @@
   window.closeAuthModal = () => {
     const modal = $('authModal');
     if(modal) modal.style.display = 'none';
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
   };
   $('choiceBadge').onclick = window.openAuthModal;
 
@@ -685,20 +690,26 @@
     };
   }
 
-  window.logoutChoice = () => {
-    $('appStatus').textContent = 'Disconnecting...';
-    alert('Auth is strictly server-side. To change credentials, visit /admin/bootstrap.');
-  };
+  function setModalAuthMsg(text, tone) {
+    const el = $('modalAuthMsg');
+    if(!el) return;
+    el.textContent = text || '';
+    el.style.color = tone === 'error' ? 'var(--red)' : tone === 'ok' ? 'var(--green)' : 'var(--text-dim)';
+  }
 
   async function checkAuthStatus() {
     try {
       const res = await fetch('/api/auth/status');
       const data = await res.json();
-      
+
       if(data.logged_in && data.has_session) {
         if ($('appStatus')) $('appStatus').textContent = `Connected (Vendor: ${data.vendor_id})`;
+        setModalAuthMsg('');
       } else {
         if ($('appStatus')) $('appStatus').textContent = 'Choice API Not Connected (Requires Login)';
+        if (data.has_credentials === false) {
+          setModalAuthMsg('No credentials stored on the server yet — configure them below first.', 'error');
+        }
       }
       if (typeof setAuthUi === 'function') setAuthUi(data.logged_in && data.has_session, data.vendor_id || 'Login');
     } catch(e) {
@@ -724,16 +735,19 @@
       });
       const data = await res.json();
       if(data.status === 'success') {
-        alert(data.message || 'Choice 1-Click Login successful!');
+        setModalAuthMsg(data.message || 'Login successful.', 'ok');
         closeAuthModal();
         checkAuthStatus();
         if ($('appStatus')) $('appStatus').textContent = 'Choice API Connected - Ready to fetch';
+      } else if(data.needs_bootstrap) {
+        setModalAuthMsg(data.message, 'error');
+        if ($('appStatus')) $('appStatus').textContent = 'Server has no Choice credentials yet';
       } else {
-        alert('Auto Login Failed: ' + data.message);
+        setModalAuthMsg('Login failed: ' + (data.message || 'unknown error'), 'error');
         if ($('appStatus')) $('appStatus').textContent = 'Login error: ' + data.message;
       }
     } catch(e) {
-      alert('Login request failed: ' + e.message);
+      setModalAuthMsg('Login request failed: ' + e.message, 'error');
     } finally {
       if(btn) { btn.disabled = false; btn.textContent = '1-Click Login'; }
     }
@@ -763,11 +777,9 @@
           symbolList.style.display = 'block';
         } else {
           symbolList.style.display = 'none';
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
         }
       } catch(e) {
         symbolList.style.display = 'none';
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
       }
     }, 200);
   });
@@ -785,14 +797,12 @@
       chip.classList.toggle('active', label === String(sym).split(' ')[0] || label === String(sym));
     });
     symbolList.style.display = 'none';
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
     updateFlow();
   };
 
   document.addEventListener('click', e => {
     if(!symbolInput.contains(e.target) && !symbolList.contains(e.target)) {
       symbolList.style.display = 'none';
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
     }
   });
 
@@ -1098,6 +1108,10 @@
 
     let trArr = [];
     allBars.forEach((b, i) => {
+      // Clear the previous pass so a shortened/lengthened period cannot leave
+      // stale warm-up values behind on bars that no longer have enough history.
+      b.sma = undefined;
+
       // MA
       if (i === 0) { b.ma = b.c; b.ema = b.c; }
       else {
@@ -1224,8 +1238,8 @@
 
     const emptyEl = $('empty');
     if (emptyEl) emptyEl.style.display = 'none';
-    document.querySelectorAll('.chart-toolbar button').forEach(b=>b.disabled=false);
-    
+    setToolbarEnabled(true);
+
     $('appStatus').textContent = `Ready · ${sessionBars.length} candles (${day}) · Start ${fmt(anchorPrice)}`;
     setReplayHint(`Ready · ${sessionBars.length} bars. Press Play or step +1 Bar.`, true);
     updateFlow();
@@ -1233,8 +1247,6 @@
     needsRender = true;
   }
 
-  function highest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=-Infinity;for(let i=start;i<=end;i++)x=Math.max(x,a[i][k]);return end-start+1>=len?x:NaN;}
-  function lowest(a,end,len,k){if(end<0)return NaN;let start=Math.max(0,end-len+1),x=Infinity;for(let i=start;i<=end;i++)x=Math.min(x,a[i][k]);return end-start+1>=len?x:NaN;}
   function netQty(){return positions.reduce((s,p)=>s+p.qty,0);}
   function avgPrice(){const q=netQty();return q?positions.reduce((s,p)=>s+p.entry*p.qty,0)/q:NaN;}
   function openPnl(price){return positions.reduce((s,p)=>s+(price-p.entry)*(p.side==='buy'?1:-1)*p.qty,0);}

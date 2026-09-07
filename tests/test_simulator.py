@@ -1,5 +1,11 @@
+import os
+import sys
 import datetime
-from server import app, parse_date_to_1980_seconds, encode_mobile, DEFAULT_SCRIPS
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+from server import app, parse_date_to_1980_seconds, encode_mobile, DEFAULT_SCRIPS  # noqa: E402
 
 def run_simulation_logic_test():
     sample_bars = [

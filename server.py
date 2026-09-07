@@ -1,9 +1,9 @@
 import os
-import sys
 import json
 import base64
 import datetime
 import threading
+import html as html_lib
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -18,11 +18,18 @@ except ImportError:
     BASE_URL_FINX = "https://finx.choiceindia.com"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INDEX_FILE = "index.html"
 app = Flask(__name__, static_folder=BASE_DIR)
 CORS(app)
 
 SESSION_FILE = os.path.join(BASE_DIR, ".choice_session.json")
+SECRETS_FILE = os.path.join(BASE_DIR, "secrets.json")
 DEFAULT_BASE_URL = BASE_URL_OMNE
+
+# Only these files may be served by the static catch-all route. Everything else
+# (server.py, secrets.json, .choice_session.json, *.log, ...) stays private.
+PUBLIC_STATIC_EXTENSIONS = {".html", ".css", ".js", ".mjs", ".map", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".woff", ".woff2", ".ttf", ".csv"}
+PRIVATE_STATIC_NAMES = {"secrets.json", "server.py", "requirements.txt", "vercel.json"}
 
 # In-memory session store & client
 scrip_master = None
@@ -202,7 +209,7 @@ def save_session_to_file():
             "mobile_no": auth_state["mobile_no"],
             "base_url": auth_state["base_url"]
         }
-        with open(SESSION_FILE, "w") as f:
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except Exception as e:
         print(f"Failed to save session to file: {e}")
@@ -211,7 +218,8 @@ def load_session_from_file():
     if not os.path.exists(SESSION_FILE):
         return False
     try:
-        with open(SESSION_FILE, "r") as f:
+        # utf-8-sig tolerates a byte-order mark written by Windows editors
+        with open(SESSION_FILE, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         if data.get("date") == datetime.date.today().isoformat() and data.get("session_id"):
             auth_state["vendor_id"] = data.get("vendor_id", "")
@@ -227,7 +235,40 @@ def load_session_from_file():
         print(f"Failed to load session from file: {e}")
     return False
 
-# Load existing active session if available
+def load_secrets_from_file():
+    """
+    Load long-lived Choice credentials (vendor id / api key / mobile) written by
+    the /admin/bootstrap route. Environment variables always win over this file.
+    """
+    if not os.path.exists(SECRETS_FILE):
+        return False
+    try:
+        with open(SECRETS_FILE, "r", encoding="utf-8-sig") as f:
+            content = f.read().strip()
+        data = json.loads(content) if content else {}
+        if not isinstance(data, dict):
+            return False
+        for key in ("vendor_id", "api_key", "mobile_no", "base_url"):
+            value = str(data.get(key, "") or "").strip()
+            if value and not auth_state.get(key):
+                auth_state[key] = value
+        return True
+    except Exception as e:
+        print(f"Failed to load secrets.json: {e}")
+    return False
+
+def save_secrets_to_file(vendor_id, api_key, mobile_no, base_url):
+    data = {
+        "vendor_id": vendor_id,
+        "api_key": api_key,
+        "mobile_no": mobile_no,
+        "base_url": base_url
+    }
+    with open(SECRETS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+# Load stored secrets, then any still-valid session for today
+load_secrets_from_file()
 load_session_from_file()
 
 # Asynchronously load Choice Scrip Master
@@ -246,11 +287,102 @@ threading.Thread(target=load_scrip_master_async, daemon=True).start()
 
 @app.route("/")
 def serve_index():
-    return send_from_directory(BASE_DIR, "KKunal_GROT_Last_SquareOff_v7.html")
+    return send_from_directory(BASE_DIR, INDEX_FILE)
 
 @app.route("/<path:path>")
 def serve_static(path):
+    """Serve front-end assets only. Never expose source, secrets or session files."""
+    name = os.path.basename(path)
+    ext = os.path.splitext(name)[1].lower()
+    if name.startswith(".") or name in PRIVATE_STATIC_NAMES or ext not in PUBLIC_STATIC_EXTENSIONS:
+        return jsonify({"status": "error", "message": "Not found"}), 404
     return send_from_directory(BASE_DIR, path)
+
+BOOTSTRAP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Configure server secrets · GROT Scalper</title>
+<style>
+ body{{margin:0;background:#F1F5F9;color:#0F172A;font:14px/1.55 'Segoe UI',system-ui,sans-serif;display:flex;justify-content:center;padding:32px 16px}}
+ .card{{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:24px;max-width:520px;width:100%;box-shadow:0 10px 15px -3px rgba(0,0,0,.08)}}
+ h1{{margin:0 0 4px;font-size:19px}}
+ p.lead{{margin:0 0 18px;color:#475569;font-size:13px}}
+ label{{display:block;margin:12px 0 4px;font-size:12px;font-weight:700;color:#475569}}
+ input,select{{width:100%;padding:9px 10px;border:1px solid #E2E8F0;border-radius:6px;font:inherit;background:#F8FAFC;color:#0F172A}}
+ button{{margin-top:18px;width:100%;padding:11px;border:0;border-radius:8px;background:#0153B8;color:#fff;font-weight:700;font-size:14px;cursor:pointer}}
+ .msg{{margin-bottom:14px;padding:10px 12px;border-radius:8px;font-size:12.5px}}
+ .ok{{background:rgba(5,150,105,.08);border:1px solid rgba(5,150,105,.22);color:#059669}}
+ .warn{{background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.22);color:#B45309}}
+ a{{color:#0153B8}}
+</style></head><body><div class="card">
+<h1>Configure server secrets</h1>
+<p class="lead">Stored in <code>secrets.json</code> next to <code>server.py</code> and never sent to the browser.
+Environment variables (<code>CHOICE_VENDOR_ID</code>, <code>CHOICE_API_KEY</code>, <code>CHOICE_MOBILE</code>) take priority over this file
+and are the only option on read-only hosts such as Vercel.</p>
+{message}
+<form method="post">
+ <label for="vendor_id">Client ID / Vendor ID</label>
+ <input id="vendor_id" name="vendor_id" value="{vendor_id}" placeholder="M09984" autocomplete="off" required>
+ <label for="api_key">API Key (Bearer)</label>
+ <input id="api_key" name="api_key" type="password" value="{api_key}" placeholder="Your Choice API key" autocomplete="off" required>
+ <label for="mobile_no">Registered mobile number</label>
+ <input id="mobile_no" name="mobile_no" value="{mobile_no}" placeholder="9876543210" autocomplete="off" required>
+ <label for="base_url">Gateway</label>
+ <select id="base_url" name="base_url">
+  <option value="{omne}"{sel_omne}>finxomne.choiceindia.com</option>
+  <option value="{finx}"{sel_finx}>finx.choiceindia.com</option>
+ </select>
+ <button type="submit">Save secrets</button>
+</form>
+<p class="lead" style="margin:16px 0 0"><a href="/">&larr; Back to the simulator</a></p>
+</div></body></html>"""
+
+def render_bootstrap_page(message_html=""):
+    base = auth_state.get("base_url") or DEFAULT_BASE_URL
+    return BOOTSTRAP_PAGE.format(
+        message=message_html,
+        vendor_id=html_lib.escape(auth_state.get("vendor_id", "")),
+        api_key=html_lib.escape(auth_state.get("api_key", "")),
+        mobile_no=html_lib.escape(auth_state.get("mobile_no", "")),
+        omne=BASE_URL_OMNE,
+        finx=BASE_URL_FINX,
+        sel_omne=" selected" if base == BASE_URL_OMNE else "",
+        sel_finx=" selected" if base == BASE_URL_FINX else ""
+    )
+
+@app.route("/admin/bootstrap", methods=["GET", "POST"])
+def admin_bootstrap():
+    """Enter the Choice credentials that the server keeps on its own side."""
+    if request.method == "GET":
+        return render_bootstrap_page()
+
+    data = request.get_json(silent=True) or request.form or {}
+    vendor_id = str(data.get("vendor_id", "")).strip()
+    api_key = str(data.get("api_key", "")).strip()
+    mobile_no = str(data.get("mobile_no", "")).strip()
+    base_url = str(data.get("base_url", "")).strip().rstrip("/") or DEFAULT_BASE_URL
+
+    if not vendor_id or not api_key or not mobile_no:
+        msg = '<div class="msg warn">Client ID, API Key and mobile number are all required.</div>'
+        return render_bootstrap_page(msg), 400
+
+    auth_state["vendor_id"] = vendor_id
+    auth_state["api_key"] = api_key
+    auth_state["mobile_no"] = mobile_no
+    auth_state["base_url"] = base_url
+    init_choice_client()
+
+    try:
+        save_secrets_to_file(vendor_id, api_key, mobile_no, base_url)
+        msg = '<div class="msg ok">Saved. Go back to the simulator and press <b>1-Click Login</b>.</div>'
+    except Exception as e:
+        msg = (f'<div class="msg warn">Held in memory for this process only &mdash; '
+               f'secrets.json could not be written ({html_lib.escape(str(e))}). '
+               f'On Vercel use environment variables instead.</div>')
+
+    if request.is_json:
+        return jsonify({"status": "success", "message": "Secrets stored", "vendor_id": vendor_id})
+    return render_bootstrap_page(msg)
 
 @app.route("/api/auth/status", methods=["GET", "POST"])
 def auth_status():
@@ -269,6 +401,7 @@ def auth_status():
         "vendor_id": creds["vendor_id"],
         "mobile_no": creds["mobile_no"],
         "has_session": bool(creds["session_id"]),
+        "has_credentials": bool(creds["vendor_id"] and creds["api_key"] and creds["mobile_no"]),
         "base_url": creds["base_url"],
         "client_ip": client_ip,
         "last_otp": auth_state.get("last_otp", "")
@@ -370,7 +503,7 @@ def auth_validate():
     """
     data = request.get_json(silent=True) or {}
     creds = extract_credentials(data, request)
-    otp = data.get("otp", "").strip() or data.get("totp", "").strip() or auth_state.get("last_otp", "")
+    otp = str(data.get("otp") or data.get("totp") or auth_state.get("last_otp") or "").strip()
     mobile_no = creds["mobile_no"]
     vendor_id = creds["vendor_id"]
     api_key = creds["api_key"]
@@ -469,7 +602,11 @@ def auth_login_auto():
     base_url = creds["base_url"]
 
     if not mobile_no or not vendor_id or not api_key:
-        return jsonify({"status": "error", "message": "Mobile number, Vendor ID, and API Key are all required"}), 400
+        return jsonify({
+            "status": "error",
+            "needs_bootstrap": True,
+            "message": "Server has no Choice credentials yet. Open /admin/bootstrap to store your Client ID, API Key and mobile number (or set CHOICE_VENDOR_ID / CHOICE_API_KEY / CHOICE_MOBILE)."
+        }), 400
 
     auth_state["mobile_no"] = mobile_no
     auth_state["vendor_id"] = vendor_id
@@ -592,9 +729,9 @@ def search_scrip():
     results = []
     
     # 1. Search dynamically from Choice ScripMaster
-    if scrip_master and scrip_master.is_loaded and query:
+    if query and getattr(scrip_master, "is_loaded", False):
         matches = []
-        for row in scrip_master.all_rows:
+        for row in getattr(scrip_master, "all_rows", []):
             d_symbol = row.get('Symbol', '').strip().upper()
             d_sec_desc = row.get('SecDesc', '').strip().upper()
             d_token = row.get('Token', '').strip()

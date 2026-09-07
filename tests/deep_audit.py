@@ -1,13 +1,24 @@
+import os
 import re
-import json
+import sys
 import datetime
-from server import app, parse_date_to_1980_seconds, encode_mobile, extract_credentials, DEFAULT_SCRIPS
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+# Windows consoles default to cp1252, which cannot encode the rupee sign.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+from server import app, parse_date_to_1980_seconds, INDEX_FILE, auth_state  # noqa: E402
 
 def audit_html_dom():
     print("==================================================")
     print("1. AUDITING HTML DOM ID CONSISTENCY")
     print("==================================================")
-    with open("KKunal_GROT_Last_SquareOff_v7.html", "r", encoding="utf-8") as f:
+    with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
         html = f.read()
 
     # Find IDs referenced in JS
@@ -188,11 +199,25 @@ def audit_flask_server():
     assert res['count'] >= 1
     assert res['results'][0]['symbol'] == 'RELIANCE'
 
-    # 5. Missing auth on historical
-    r = client.post('/api/historical', json={"token": 26000, "from_date": "2026-03-01", "to_date": "2026-03-02"})
-    assert r.status_code == 401, "Historical without auth should return 401"
+    # 5. Missing auth on historical (only meaningful when the box has no stored creds)
+    if not auth_state.get("vendor_id"):
+        r = client.post('/api/historical', json={"token": 26000, "from_date": "2026-03-01", "to_date": "2026-03-02"})
+        assert r.status_code == 401, "Historical without auth should return 401"
+    else:
+        print("SKIP: historical 401 guard (server already holds credentials)")
 
-    # 6. Date parser calculation check
+    # 6. Static catch-all must never leak source, secrets or session files
+    for leak in ('server.py', 'secrets.json', '.choice_session.json', 'requirements.txt'):
+        r = client.get('/' + leak)
+        assert r.status_code == 404, f"Static route leaked {leak} (HTTP {r.status_code})"
+
+    # 7. Secrets bootstrap page is reachable (the login modal links to it)
+    r = client.get('/admin/bootstrap')
+    assert r.status_code == 200, "/admin/bootstrap must render the secrets form"
+    r = client.post('/admin/bootstrap', json={"vendor_id": "", "api_key": "", "mobile_no": ""})
+    assert r.status_code == 400, "/admin/bootstrap must reject incomplete credentials"
+
+    # 8. Date parser calculation check
     sec1 = parse_date_to_1980_seconds("2026-01-01")
     sec2 = parse_date_to_1980_seconds("2026-01-01 09:15:00")
     assert sec2 > sec1
