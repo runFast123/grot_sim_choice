@@ -515,7 +515,7 @@
       </div>
     </div>
   </div>
-</div>
+</div>>
 
 <script>
 (() => {
@@ -677,7 +677,7 @@
   // AUTHENTICATION & CHOICE API LOGIC (Server-Side Managed)
   // --------------------------------------------------------------------------
   // The browser no longer stores API Keys or Client IDs.
-  // It only relies on the backend server.py state or cookies/session matching.
+  // It only relies on the backend `server.py` state or cookies/session matching.
   
   function getAuthHeaders() {
     return {
@@ -686,7 +686,7 @@
   }
 
   window.logoutChoice = () => {
-    appStatus.textContent = 'Disconnecting...';
+    $('appStatus').textContent = 'Disconnecting...';
     alert('Auth is strictly server-side. To change credentials, visit /admin/bootstrap.');
   };
 
@@ -696,14 +696,14 @@
       const data = await res.json();
       
       if(data.logged_in && data.has_session) {
-        if (appStatus) appStatus.textContent = Connected (Vendor: );
+        if ($('appStatus')) $('appStatus').textContent = `Connected (Vendor: ${data.vendor_id})`;
       } else {
-        if (appStatus) appStatus.textContent = 'Choice API Not Connected (Requires Login)';
+        if ($('appStatus')) $('appStatus').textContent = 'Choice API Not Connected (Requires Login)';
       }
       if (typeof setAuthUi === 'function') setAuthUi(data.logged_in && data.has_session, data.vendor_id || 'Login');
     } catch(e) {
       console.warn('Backend offline', e);
-      if (appStatus) appStatus.textContent = 'Cannot reach backend server.py';
+      if ($('appStatus')) $('appStatus').textContent = 'Cannot reach backend server.py';
       if (typeof setAuthUi === 'function') setAuthUi(false, 'Offline');
     }
   }
@@ -712,10 +712,9 @@
   setInterval(checkAuthStatus, 60000); // Check every minute
 
   window.autoLogin = async () => {
-    const btn = autoLoginBtn;
-    btn.disabled = true;
-    btn.textContent = 'Logging in via Server...';
-    if (appStatus) appStatus.textContent = 'Server Authenticating with Choice API (GetClientLoginTOTP)...';
+    const btn = $('autoLoginBtn');
+    if(btn) { btn.disabled = true; btn.textContent = 'Logging in via Server...'; }
+    if ($('appStatus')) $('appStatus').textContent = 'Server Authenticating with Choice API (GetClientLoginTOTP)...';
 
     try {
       const res = await fetch('/api/auth/login_auto', {
@@ -728,20 +727,17 @@
         alert(data.message || 'Choice 1-Click Login successful!');
         closeAuthModal();
         checkAuthStatus();
-        if (appStatus) appStatus.textContent = 'Choice API Connected - Ready to fetch';
+        if ($('appStatus')) $('appStatus').textContent = 'Choice API Connected - Ready to fetch';
       } else {
         alert('Auto Login Failed: ' + data.message);
-        if (appStatus) appStatus.textContent = 'Login error: ' + data.message;
+        if ($('appStatus')) $('appStatus').textContent = 'Login error: ' + data.message;
       }
     } catch(e) {
       alert('Login request failed: ' + e.message);
     } finally {
-      btn.disabled = false;
-      btn.textContent = '1-Click Login';
+      if(btn) { btn.disabled = false; btn.textContent = '1-Click Login'; }
     }
   };
-
-  // We no longer need verify2FA or getClientOtp in the frontend because login_auto does everything on the server
 
   // Symbol Autocomplete search
   const symbolInput = $('symbolInput');
@@ -752,13 +748,9 @@
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
       const q = symbolInput.value.trim();
-      const local = getStoredAuth();
       try {
         const res = await fetch(`/api/scrip/search?query=${encodeURIComponent(q)}`, {
-          headers: {
-            'X-Vendor-Id': local.vendor_id || '',
-            'X-Session-Id': local.session_id || ''
-          }
+          headers: {}
         });
         const data = await res.json();
         if(data.results && data.results.length) {
@@ -856,17 +848,6 @@
 
   // Fetch historical data from Choice API (Hybrid: Direct Browser + Serverless Proxy Fallback)
   $('fetchApiBtn').addEventListener('click', async () => {
-    const local = getStoredAuth();
-    const vendorId = local.vendor_id || $('modalVendorId').value.trim();
-    const sessionId = local.session_id || $('modalSessionId').value.trim();
-    const apiKey = local.api_key || $('modalApiKey').value.trim();
-    const baseUrl = local.base_url || $('modalBaseUrl').value || 'https://finxomne.choiceindia.com';
-
-    if(!vendorId || (!sessionId && !apiKey)) {
-      openAuthModal();
-      alert('Choice login required.\n\nOpen the Choice login badge, then use 1-click login or paste a session ID.');
-      return;
-    }
 
     const btn = $('fetchApiBtn');
     btn.disabled = true;
@@ -882,81 +863,37 @@
     let loadedBars = null;
     let lastErrorMsg = '';
 
-    // Attempt 1: Direct Browser-to-Choice fetch (matches user's local ISP static IP directly)
+    const payload = {
+      segment_id: segmentId,
+      token: token,
+      from_date: fromDate,
+      to_date: toDate,
+      interval: interval
+    };
+
     try {
-      const fromSec = parse1980Seconds(fromDate, false);
-      const toSec = parse1980Seconds(toDate, true);
-      const directHeaders = {
-        'Content-Type': 'application/json',
-        'VendorId': vendorId,
-        'Bearer': apiKey
-      };
-      if(sessionId) directHeaders['Authorization'] = `SessionId ${sessionId}`;
-
-      const directRes = await fetch(`${baseUrl}/api/OpenGraph/ChartData`, {
+      const res = await fetch('/api/historical', {
         method: 'POST',
-        headers: directHeaders,
-        body: JSON.stringify({
-          SegmentId: segmentId,
-          Token: token,
-          FromDate: fromSec,
-          ToDate: toSec,
-          Interval: interval
-        })
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
       });
+      const data = await res.json();
 
-      if(directRes.ok) {
-        const directJson = await directRes.json();
-        const parsed = parseChoiceChartResponse(directJson);
-        if(parsed && parsed.length) {
-          loadedBars = parsed;
-        }
+      if(data.status === 'success' && data.bars && data.bars.length) {
+        loadedBars = data.bars.map(b => ({
+          dt: parseDate(b.dt) || new Date(b.dt),
+          o: +b.o,
+          h: +b.h,
+          l: +b.l,
+          c: +b.c,
+          v: +b.v || 0
+        })).filter(b => b.dt && !isNaN(b.dt.getTime()));
+      } else {
+        lastErrorMsg = data.message || 'No candle data returned for selection.';
       }
-    } catch(directErr) {
-      // Direct CORS or network error, proceed to server proxy fallback
-    }
-
-    // Attempt 2: Serverless proxy fallback with client IP forwarding and dual gateway fallback
-    if(!loadedBars || !loadedBars.length) {
-      const payload = {
-        segment_id: segmentId,
-        token: token,
-        from_date: fromDate,
-        to_date: toDate,
-        interval: interval,
-        vendor_id: vendorId,
-        session_id: sessionId,
-        api_key: apiKey,
-        base_url: baseUrl
-      };
-
-      try {
-        const res = await fetch('/api/historical', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Vendor-Id': vendorId,
-            'X-Api-Key': apiKey,
-            'X-Session-Id': sessionId,
-            'X-Base-Url': baseUrl
-          },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-
-        if(data.status === 'success' && data.bars && data.bars.length) {
-          loadedBars = data.bars.map(b => ({
-            dt: parseDate(b.dt) || new Date(b.dt),
-            o: +b.o,
-            h: +b.h,
-            l: +b.l,
-            c: +b.c,
-            v: +b.v || 0
-          })).filter(b => b.dt && !isNaN(b.dt.getTime()));
-        } else {
-          lastErrorMsg = data.message || 'No candle data returned for selection.';
-        }
-      } catch(proxyErr) {
+    } catch(proxyErr) {
         lastErrorMsg = proxyErr.message;
       }
     }
