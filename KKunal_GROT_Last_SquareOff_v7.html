@@ -894,8 +894,7 @@
         lastErrorMsg = data.message || 'No candle data returned for selection.';
       }
     } catch(proxyErr) {
-        lastErrorMsg = proxyErr.message;
-      }
+      lastErrorMsg = proxyErr.message;
     }
 
     if(loadedBars && loadedBars.length) {
