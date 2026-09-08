@@ -189,6 +189,8 @@
     .metric:hover{border-color:#CBD5E1;transform:translateY(-1px);box-shadow:var(--shadow-md)}
     .metric span{display:block;color:var(--text-muted);font-size:10px;text-transform:uppercase;font-weight:700;letter-spacing:0.04em}
     .metric strong{display:block;font-size:15px;margin-top:5px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text)}
+    .metric.wide{grid-column:span 2}
+    .metric .metric-sub{display:block;margin-top:3px;font-size:10px;font-weight:600;color:var(--text-dim);text-transform:none;letter-spacing:0}
     .equity-wrap{height:230px;position:relative;background:#FFFFFF;border-radius:var(--radius-md);border:1px solid var(--border);overflow:hidden}
 
     .dropzone{display:block;padding:18px 12px;border:1px dashed #94A3B8;border-radius:var(--radius-md);background:var(--bg-inner);color:var(--text-muted);text-align:center;cursor:pointer;margin:8px 0;transition:all .15s ease}
@@ -467,13 +469,15 @@
       </div>
       <div class="panel" style="display:flex;flex-direction:column">
         <div class="section-title">GROT vs one-time entry</div>
-        <div class="table-wrap" style="border:none;background:transparent"><table><tbody><tr><th>Completed scalps</th><td id="sumTrades">0</td></tr><tr><th>Active GROT entries</th><td id="sumActive">0</td></tr><tr><th>Last square-off reference</th><td id="lastSquareRef">—</td></tr><tr><th>Next pending entry levels</th><td id="nextTriggers">—</td></tr><tr><th>GROT quantity cap</th><td id="sumQtyCap">0</td></tr><tr><th>Peak GROT open quantity</th><td id="sumMaxQty">0</td></tr><tr><th>Cumulative GROT bought quantity</th><td id="sumCumulativeQty">0</td></tr><tr><th>Available GROT capacity</th><td id="sumAvailableQty">0</td></tr><tr><th>Winning trades</th><td id="sumWins">0</td></tr><tr><th>Win rate</th><td id="sumWinRate">0%</td></tr><tr><th>GROT gross P&L</th><td id="sumGross" class="blue">₹0.00</td></tr><tr><th>Costs</th><td id="sumCosts" class="red">₹0.00</td></tr><tr><th>GROT total P&L</th><td id="sumNet">₹0.00</td></tr><tr><th>One-time entry</th><td id="oneEntry">—</td></tr><tr><th>One-time static quantity</th><td id="oneQty">0</td></tr><tr><th>One-time hold P&L</th><td id="onePnl">₹0.00</td></tr><tr><th>GROT advantage</th><td id="grotAdv">₹0.00</td></tr></tbody></table></div>
+        <div class="table-wrap" style="border:none;background:transparent"><table><tbody><tr><th>Completed scalps</th><td id="sumTrades">0</td></tr><tr><th>Active GROT entries</th><td id="sumActive">0</td></tr><tr><th>Last square-off reference</th><td id="lastSquareRef">—</td></tr><tr><th>Next pending entry levels</th><td id="nextTriggers">—</td></tr><tr><th>GROT quantity cap</th><td id="sumQtyCap">0</td></tr><tr><th>Peak GROT open quantity</th><td id="sumMaxQty">0</td></tr><tr><th>Cumulative GROT bought quantity</th><td id="sumCumulativeQty">0</td></tr><tr><th>Available GROT capacity</th><td id="sumAvailableQty">0</td></tr><tr><th>Winning trades</th><td id="sumWins">0</td></tr><tr><th>Win rate</th><td id="sumWinRate">0%</td></tr><tr><th>Realised gross P&L</th><td id="sumGross" class="blue">₹0.00</td></tr><tr><th>Costs (brokerage + statutory)</th><td id="sumCosts" class="red">₹0.00</td></tr><tr><th>Realised net P&L</th><td id="sumRealisedNet">₹0.00</td></tr><tr><th>Open (unrealised) P&L</th><td id="sumOpenPnl">₹0.00</td></tr><tr><th>GROT total P&L</th><td id="sumNet">₹0.00</td></tr><tr><th>One-time entry</th><td id="oneEntry">—</td></tr><tr><th>One-time static quantity</th><td id="oneQty">0</td></tr><tr><th>One-time hold P&L</th><td id="onePnl">₹0.00</td></tr><tr><th>GROT advantage</th><td id="grotAdv">₹0.00</td></tr></tbody></table></div>
         <div class="note" style="margin-top:auto">After every square-off, the pending ladder resets from the latest square-off price. It is not calculated from average price.</div>
       </div>
     </div>
     <div class="panel">
       <div class="section-title">Risk &amp; scalping analytics</div>
       <div class="advanced-grid">
+        <div class="metric wide" title="Realised gross P&amp;L before costs, then the same trades after brokerage and statutory charges. Open positions are excluded — they carry no cost until they square off."><span>Gross → Net (realised)</span><strong id="mGrossNet">₹0.00 → ₹0.00</strong><span class="metric-sub" id="mGrossNetSub">No completed scalps yet</span></div>
+        <div class="metric" title="Realised net as a percentage of realised gross. 100% means costs took nothing; lower means brokerage and taxes ate more of the edge."><span>Net as % of Gross</span><strong id="mCostDrag">—</strong></div>
         <div class="metric"><span>GROT Max Drawdown</span><strong id="mGrotDD">₹0.00</strong></div>
         <div class="metric"><span>One-Time Max Drawdown</span><strong id="mOneDD">₹0.00</strong></div>
         <div class="metric"><span>GROT DD vs One-Time</span><strong id="mDDReduction">0%</strong></div>
@@ -1408,12 +1412,21 @@
 
   function updateData(){
     const b=sessionBars[Math.min(idx,sessionBars.length-1)],c=config();
+    // P&L ladder. Every figure below reconciles:
+    //   gross - cost = net (realised, completed trades only)
+    //   net + open   = grotTotal (total equity)
+    // Open positions are deliberately excluded from gross/cost/net: they have not
+    // paid brokerage or statutory charges yet, so folding them in would overstate
+    // gross and make the cost columns unreadable.
     const open=b?openPnl(b.c):0;
     const gross=trades.reduce((s,t)=>s+t.gross,0);
     const cost=trades.reduce((s,t)=>s+(t.cost !== undefined ? t.cost : (t.gross-t.net)),0);
     const net=gross-cost;
     const wins=trades.filter(t=>t.net>0).length;
     const grotTotal=net+open;
+    // Only meaningful on a profitable gross: with a negative gross the ratio
+    // inverts and would read as "more than 100% retained".
+    const netPctOfGross=gross>0?net/gross*100:NaN;
     const onePnl=b?oneTimePnl(b.c,c):0;
     const adv=grotTotal-onePnl;
     const avgHold=trades.length?trades.reduce((s,t)=>s+(t.exitTime-t.entryTime)/60000,0)/trades.length:0;
@@ -1447,6 +1460,14 @@
     if ($('sumWinRate')) $('sumWinRate').textContent=trades.length?fmt(wins/trades.length*100)+'%':'0%';
     if ($('sumGross')) $('sumGross').textContent=money(gross);
     if ($('sumCosts')) $('sumCosts').textContent=money(cost);
+    if ($('sumRealisedNet')) {
+      $('sumRealisedNet').textContent=money(net);
+      $('sumRealisedNet').className=net>=0?'green':'red';
+    }
+    if ($('sumOpenPnl')) {
+      $('sumOpenPnl').textContent=money(open);
+      $('sumOpenPnl').className=open>=0?'green':'red';
+    }
     if ($('sumNet')) {
       $('sumNet').textContent=money(grotTotal);
       $('sumNet').className=grotTotal>=0?'green':'red';
@@ -1460,6 +1481,19 @@
     if ($('grotAdv')) {
       $('grotAdv').textContent=money(adv);
       $('grotAdv').className=adv>=0?'green':'red';
+    }
+    if ($('mGrossNet')) {
+      $('mGrossNet').textContent=`${money(gross)} → ${money(net)}`;
+      $('mGrossNet').className=net>=0?'green':'red';
+    }
+    if ($('mGrossNetSub')) {
+      $('mGrossNetSub').textContent=trades.length
+        ? `${money(cost)} of costs over ${trades.length} scalp${trades.length===1?'':'s'}`
+        : 'No completed scalps yet';
+    }
+    if ($('mCostDrag')) {
+      $('mCostDrag').textContent=Number.isFinite(netPctOfGross)?fmt(netPctOfGross)+'%':'—';
+      $('mCostDrag').className=!Number.isFinite(netPctOfGross)?'':netPctOfGross>=50?'green':'red';
     }
     if ($('mGrotDD')) $('mGrotDD').textContent=ddMoney(maxGrotDD);
     if ($('mOneDD')) $('mOneDD').textContent=ddMoney(maxOneDD);
