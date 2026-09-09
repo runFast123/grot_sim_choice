@@ -188,9 +188,15 @@ def audit_flask_server():
     assert r.status_code == 200, "Client IP must return 200"
     assert "ip" in r.get_json(), "Must contain ip"
 
-    # 3. Auth status endpoint
+    # 3. Auth status endpoint. It is unauthenticated, so it may only publish
+    #    booleans and non-sensitive identifiers -- never a secret, the live OTP,
+    #    or the registered mobile number.
     r = client.get('/api/auth/status')
     assert r.status_code == 200, "Status must return 200"
+    payload = r.get_json()
+    forbidden = {"api_key", "session_id", "access_token", "last_otp", "otp", "mobile_no", "password"}
+    exposed = forbidden.intersection(payload.keys())
+    assert not exposed, f"/api/auth/status leaks sensitive fields: {sorted(exposed)}"
 
     # 4. Scrip search
     r = client.get('/api/scrip/search?query=reliance')

@@ -322,11 +322,11 @@ and are the only option on read-only hosts such as Vercel.</p>
 {message}
 <form method="post">
  <label for="vendor_id">Client ID / Vendor ID</label>
- <input id="vendor_id" name="vendor_id" value="{vendor_id}" placeholder="M09984" autocomplete="off" required>
+ <input id="vendor_id" name="vendor_id" value="{vendor_id}" placeholder="e.g. M12345" autocomplete="off" required>
  <label for="api_key">API Key (Bearer)</label>
  <input id="api_key" name="api_key" type="password" value="{api_key}" placeholder="Your Choice API key" autocomplete="off" required>
  <label for="mobile_no">Registered mobile number</label>
- <input id="mobile_no" name="mobile_no" value="{mobile_no}" placeholder="9876543210" autocomplete="off" required>
+ <input id="mobile_no" name="mobile_no" value="{mobile_no}" placeholder="e.g. 9876543210" autocomplete="off" required>
  <label for="base_url">Gateway</label>
  <select id="base_url" name="base_url">
   <option value="{omne}"{sel_omne}>finxomne.choiceindia.com</option>
@@ -395,16 +395,18 @@ def auth_status():
         or request.remote_addr
         or ""
     )
+    # This endpoint is unauthenticated, so it reports state as booleans only.
+    # It must never carry the api key, session id, access token, the live OTP,
+    # or the registered mobile number. auth_validate still reads last_otp from
+    # auth_state server-side; it just is not published here.
     return jsonify({
         "status": "success",
         "logged_in": creds["logged_in"],
         "vendor_id": creds["vendor_id"],
-        "mobile_no": creds["mobile_no"],
         "has_session": bool(creds["session_id"]),
         "has_credentials": bool(creds["vendor_id"] and creds["api_key"] and creds["mobile_no"]),
         "base_url": creds["base_url"],
-        "client_ip": client_ip,
-        "last_otp": auth_state.get("last_otp", "")
+        "client_ip": client_ip
     })
 
 @app.route("/api/client_ip", methods=["GET"])

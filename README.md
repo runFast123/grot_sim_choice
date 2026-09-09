@@ -91,7 +91,7 @@ Serverless-ready with the Python runtime (`api/index.py` and `vercel.json`).
 Serverless instances have a read-only filesystem, so `/admin/bootstrap` cannot persist
 there. Configure credentials in **Project Settings → Environment Variables** instead:
 
-- `CHOICE_VENDOR_ID` — your Choice Client ID (e.g. `M09984`)
+- `CHOICE_VENDOR_ID` — your Choice Client ID (format `M12345`)
 - `CHOICE_API_KEY` — your Choice Bearer API key
 - `CHOICE_BASE_URL` — `https://finxomne.choiceindia.com` or `https://finx.choiceindia.com`
 - `CHOICE_MOBILE` — your registered mobile number
