@@ -126,16 +126,34 @@ def test_api_endpoints():
     results = resp.get_json().get('results', [])
     assert len(results) > 0, "NIFTY should be found in default scrips"
 
-    # Check input validation & missing auth errors
-    resp = client.post('/api/auth/get_client_otp', json={})
-    assert resp.status_code == 400, "Empty mobile should return 400"
+    # Input validation and missing-auth guards. These must be checked against a
+    # credential-free server: with real credentials resolvable the guards are
+    # skipped and the request would reach the live Choice gateway, so the suite
+    # would both assert the wrong thing and fire a real LoginTOTP.
+    import server as _server
+    saved_state = dict(_server.auth_state)
+    saved_env = {k: os.environ.pop(k) for k in
+                 ("CHOICE_VENDOR_ID", "CHOICE_API_KEY", "CHOICE_MOBILE",
+                  "CHOICE_SESSION_ID", "CHOICE_ACCESS_TOKEN")
+                 if k in os.environ}
+    try:
+        for key in ("vendor_id", "api_key", "mobile_no", "session_id", "access_token"):
+            _server.auth_state[key] = ""
+        _server.auth_state["logged_in"] = False
 
-    resp = client.post('/api/auth/validate', json={})
-    assert resp.status_code == 400, "Empty OTP should return 400"
+        resp = client.post('/api/auth/get_client_otp', json={})
+        assert resp.status_code == 400, "Empty mobile should return 400"
 
-    resp = client.post('/api/historical', json={"token": 26000})
-    assert resp.status_code == 401, "Historical without vendor_id/session_id should return 401 Unauthorized"
-    
+        resp = client.post('/api/auth/validate', json={})
+        assert resp.status_code == 400, "Empty OTP should return 400"
+
+        resp = client.post('/api/historical', json={"token": 26000})
+        assert resp.status_code == 401, "Historical without vendor_id/session_id should return 401 Unauthorized"
+    finally:
+        _server.auth_state.clear()
+        _server.auth_state.update(saved_state)
+        os.environ.update(saved_env)
+
     print("All Flask API endpoint and serverless auth tests passed!")
 
 if __name__ == "__main__":

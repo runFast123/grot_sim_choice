@@ -205,12 +205,24 @@ def audit_flask_server():
     assert res['count'] >= 1
     assert res['results'][0]['symbol'] == 'RELIANCE'
 
-    # 5. Missing auth on historical (only meaningful when the box has no stored creds)
-    if not auth_state.get("vendor_id"):
+    # 5. Missing auth on historical. Isolated from whatever credentials this
+    #    machine happens to hold, so the guard is always genuinely exercised and
+    #    the request can never escape to the live Choice gateway.
+    saved_state = dict(auth_state)
+    saved_env = {k: os.environ.pop(k) for k in
+                 ("CHOICE_VENDOR_ID", "CHOICE_API_KEY", "CHOICE_MOBILE",
+                  "CHOICE_SESSION_ID", "CHOICE_ACCESS_TOKEN")
+                 if k in os.environ}
+    try:
+        for key in ("vendor_id", "api_key", "mobile_no", "session_id", "access_token"):
+            auth_state[key] = ""
+        auth_state["logged_in"] = False
         r = client.post('/api/historical', json={"token": 26000, "from_date": "2026-03-01", "to_date": "2026-03-02"})
         assert r.status_code == 401, "Historical without auth should return 401"
-    else:
-        print("SKIP: historical 401 guard (server already holds credentials)")
+    finally:
+        auth_state.clear()
+        auth_state.update(saved_state)
+        os.environ.update(saved_env)
 
     # 6. Static catch-all must never leak source, secrets or session files
     for leak in ('server.py', 'secrets.json', '.choice_session.json', 'requirements.txt'):
@@ -231,10 +243,87 @@ def audit_flask_server():
 
     print("PASS: All Flask endpoints, date parsers, and error guards functioning properly.")
 
+def audit_credential_persistence():
+    """
+    The two credential lifetimes must stay separate. A session file from an
+    earlier day has to keep yielding vendor_id / api_key / mobile_no, otherwise
+    the user is forced through /admin/bootstrap again every single calendar day
+    before they can even reach the login button.
+    """
+    print("\n==================================================")
+    print("4. AUDITING CREDENTIAL LIFETIME SEPARATION")
+    print("==================================================")
+    import json
+    import tempfile
+    import datetime as _dt
+    import server
+
+    tmp = tempfile.mkdtemp()
+    saved = (server.SESSION_FILE, server.SECRETS_FILE, dict(server.auth_state))
+
+    def reset():
+        for k in server.LONG_LIVED_KEYS + ("session_id", "access_token"):
+            server.auth_state[k] = ""
+        server.auth_state["base_url"] = server.DEFAULT_BASE_URL
+        server.auth_state["logged_in"] = False
+
+    def write(name, obj):
+        path = os.path.join(tmp, name)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f)
+        return path
+
+    try:
+        server.SECRETS_FILE = os.path.join(tmp, "absent.json")
+
+        # A session file from a previous day
+        server.SESSION_FILE = write("stale.json", {
+            "date": "2020-01-01", "vendor_id": "V1", "api_key": "K1",
+            "mobile_no": "M1", "session_id": "SESSION_OLD", "access_token": "TOKEN_OLD"
+        })
+        reset()
+        server.load_secrets_from_file()
+        fresh = server.load_session_from_file()
+        assert server.auth_state["api_key"] == "K1", "stale session file must still yield the api key"
+        assert server.auth_state["vendor_id"] == "V1", "stale session file must still yield the vendor id"
+        assert server.auth_state["mobile_no"] == "M1", "stale session file must still yield the mobile number"
+        assert not server.auth_state["session_id"], "an expired session id must NOT be restored"
+        assert fresh is False, "a stale file must not report a live session"
+        print("PASS: expired session dropped, long-lived credentials retained.")
+
+        # Today's session file
+        server.SESSION_FILE = write("fresh.json", {
+            "date": _dt.date.today().isoformat(), "vendor_id": "V1", "api_key": "K1",
+            "mobile_no": "M1", "session_id": "SESSION_NEW", "access_token": "TOKEN_NEW"
+        })
+        reset()
+        assert server.load_session_from_file() is True
+        assert server.auth_state["session_id"] == "SESSION_NEW"
+        print("PASS: same-day session restored without re-login.")
+
+        # A rotated key in secrets.json must not be overwritten by the older copy
+        server.SECRETS_FILE = write("secrets.json", {
+            "vendor_id": "V2", "api_key": "K_ROTATED", "mobile_no": "M2"
+        })
+        server.SESSION_FILE = write("stale2.json", {
+            "date": "2020-01-01", "vendor_id": "V1", "api_key": "K_STALE",
+            "mobile_no": "M1", "session_id": "SESSION_OLD"
+        })
+        reset()
+        server.load_secrets_from_file()
+        server.load_session_from_file()
+        assert server.auth_state["api_key"] == "K_ROTATED", "secrets.json must outrank the session file copy"
+        print("PASS: rotated credentials outrank the cached session copy.")
+    finally:
+        server.SESSION_FILE, server.SECRETS_FILE = saved[0], saved[1]
+        server.auth_state.clear()
+        server.auth_state.update(saved[2])
+
 if __name__ == "__main__":
     audit_html_dom()
     audit_simulation_algorithms()
     audit_flask_server()
+    audit_credential_persistence()
     print("\n==================================================")
     print("🎉 DEEP SYSTEM AUDIT COMPLETE — ALL CHECKS PASSED!")
     print("==================================================")

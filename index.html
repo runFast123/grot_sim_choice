@@ -713,6 +713,10 @@
         if ($('appStatus')) $('appStatus').textContent = 'Choice API Not Connected (Requires Login)';
         if (data.has_credentials === false) {
           setModalAuthMsg('No credentials stored on the server yet — configure them below first.', 'error');
+        } else {
+          // Choice issues a session per trading day, so one login each day is
+          // expected. The stored API key is reused — nothing to re-enter.
+          setModalAuthMsg('Credentials stored. Choice sessions last one trading day — click above to start today’s.', '');
         }
       }
       if (typeof setAuthUi === 'function') setAuthUi(data.logged_in && data.has_session, data.vendor_id || 'Login');

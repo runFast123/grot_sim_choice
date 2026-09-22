@@ -198,7 +198,35 @@ def init_choice_client():
         except Exception as e:
             print(f"Error initializing ChoiceClient: {e}")
 
+# Credentials have two different lifetimes and must be treated separately:
+#   LONG_LIVED  issued once in the Choice portal, valid until you change them
+#   DAILY       issued by ValidateTOTP, dead after the trading day
+LONG_LIVED_KEYS = ("vendor_id", "api_key", "mobile_no", "base_url")
+
+def fill_missing_credentials(data, keys=LONG_LIVED_KEYS):
+    """
+    Copy stored values into auth_state without clobbering a higher-priority
+    source. Environment variables load first and always win, then secrets.json,
+    then the session file.
+    """
+    env_base = os.environ.get("CHOICE_BASE_URL", "").strip()
+    filled = False
+    for key in keys:
+        value = str(data.get(key, "") or "").strip()
+        if not value:
+            continue
+        current = str(auth_state.get(key) or "").strip()
+        # base_url is seeded with a default, so an untouched default counts as unset
+        if key == "base_url" and not env_base and current == DEFAULT_BASE_URL:
+            current = ""
+        if not current:
+            auth_state[key] = value
+            filled = True
+    return filled
+
 def save_session_to_file():
+    """Persist the daily session, and mirror the long-lived credentials so a
+    date rollover cannot strand the user without an API key."""
     try:
         data = {
             "date": datetime.date.today().isoformat(),
@@ -214,26 +242,53 @@ def save_session_to_file():
     except Exception as e:
         print(f"Failed to save session to file: {e}")
 
+    if auth_state.get("vendor_id") and auth_state.get("api_key"):
+        try:
+            save_secrets_to_file(
+                auth_state["vendor_id"],
+                auth_state["api_key"],
+                auth_state.get("mobile_no", ""),
+                auth_state.get("base_url", DEFAULT_BASE_URL)
+            )
+        except Exception as e:
+            # Read-only filesystem (Vercel). Env vars are the supported path there.
+            print(f"Could not mirror credentials to secrets.json: {e}")
+
 def load_session_from_file():
+    """
+    Restore auth state from the cached session file.
+
+    The file mixes both lifetimes. The long-lived credentials are recovered
+    unconditionally -- gating them on the date stamp meant every calendar
+    rollover threw away a perfectly valid API key and forced a full re-bootstrap
+    before the user could even reach the login button. Only session_id and
+    access_token are date-gated, because Choice really does expire those daily.
+    """
     if not os.path.exists(SESSION_FILE):
         return False
     try:
         # utf-8-sig tolerates a byte-order mark written by Windows editors
         with open(SESSION_FILE, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
-        if data.get("date") == datetime.date.today().isoformat() and data.get("session_id"):
-            auth_state["vendor_id"] = data.get("vendor_id", "")
-            auth_state["api_key"] = data.get("api_key", "")
-            auth_state["session_id"] = data.get("session_id", "")
-            auth_state["access_token"] = data.get("access_token", "")
-            auth_state["mobile_no"] = data.get("mobile_no", "")
-            auth_state["base_url"] = data.get("base_url", DEFAULT_BASE_URL)
-            auth_state["logged_in"] = bool(auth_state["session_id"])
-            init_choice_client()
-            return True
     except Exception as e:
         print(f"Failed to load session from file: {e}")
-    return False
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    fill_missing_credentials(data)
+
+    session_is_today = (
+        data.get("date") == datetime.date.today().isoformat()
+        and bool(data.get("session_id"))
+    )
+    if session_is_today:
+        auth_state["session_id"] = str(data.get("session_id", "") or "")
+        auth_state["access_token"] = str(data.get("access_token", "") or "")
+        auth_state["logged_in"] = bool(auth_state["session_id"])
+
+    init_choice_client()
+    return session_is_today
 
 def load_secrets_from_file():
     """
@@ -248,10 +303,7 @@ def load_secrets_from_file():
         data = json.loads(content) if content else {}
         if not isinstance(data, dict):
             return False
-        for key in ("vendor_id", "api_key", "mobile_no", "base_url"):
-            value = str(data.get(key, "") or "").strip()
-            if value and not auth_state.get(key):
-                auth_state[key] = value
+        fill_missing_credentials(data)
         return True
     except Exception as e:
         print(f"Failed to load secrets.json: {e}")
@@ -267,7 +319,9 @@ def save_secrets_to_file(vendor_id, api_key, mobile_no, base_url):
     with open(SECRETS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-# Load stored secrets, then any still-valid session for today
+# Env vars are already in auth_state. Layer secrets.json under them, then the
+# session file -- which also carries long-lived credentials for anyone who
+# logged in before /admin/bootstrap existed.
 load_secrets_from_file()
 load_session_from_file()
 
