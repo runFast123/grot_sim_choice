@@ -120,7 +120,10 @@ def run_engine(candles, config, anchor=100.0):
             target = p['entry'] + config['square'] if p['side'] == 'buy' else p['entry'] - config['square']
             hit = b['h'] >= target if p['side'] == 'buy' else b['l'] <= target
             if hit:
-                latest_target = target
+                if latest_target is None:
+                    latest_target = target
+                else:
+                    latest_target = max(latest_target, target) if config['dir'] == 'buy' else min(latest_target, target)
                 close_one(p, target, b, 'STEP SQUARE-OFF')
         if latest_target is not None:
             last_square_off = latest_target
@@ -319,11 +322,111 @@ def audit_credential_persistence():
         server.auth_state.clear()
         server.auth_state.update(saved[2])
 
+def calculate_trade_cost(side, entry, exit_price, qty, config):
+    model = config.get('cost_model', 'fo_futures')
+    if model == 'zero':
+        return 0.0
+    if model == 'flat_custom':
+        return float(max(0.0, config.get('cost', 0.0)))
+
+    buy_price = entry if side == 'buy' else exit_price
+    sell_price = exit_price if side == 'buy' else entry
+    turnover_buy = buy_price * qty
+    turnover_sell = sell_price * qty
+    total_turnover = turnover_buy + turnover_sell
+
+    base_brok = float(max(0.0, config.get('brokerage_rate', 20.0)))
+    if model == 'cash_intra':
+        brokerage_buy = min(base_brok, turnover_buy * 0.0003)
+        brokerage_sell = min(base_brok, turnover_sell * 0.0003)
+    else:
+        brokerage_buy = base_brok
+        brokerage_sell = base_brok
+    brokerage = brokerage_buy + brokerage_sell
+
+    stt = 0.0
+    if model == 'fo_futures':
+        stt = turnover_sell * 0.0002
+    elif model == 'fo_options':
+        stt = turnover_sell * 0.001
+    elif model == 'cash_intra':
+        stt = turnover_sell * 0.00025
+
+    txn = 0.0
+    if model == 'fo_futures':
+        txn = total_turnover * 0.0000173
+    elif model == 'fo_options':
+        txn = total_turnover * 0.00035
+    elif model == 'cash_intra':
+        txn = total_turnover * 0.0000297
+
+    sebi = total_turnover * 0.000001
+    gst = (brokerage + txn + sebi) * 0.18
+
+    stamp = 0.0
+    if model == 'fo_futures':
+        stamp = turnover_buy * 0.00002
+    elif model in ('fo_options', 'cash_intra'):
+        stamp = turnover_buy * 0.00003
+
+    total = brokerage + stt + txn + sebi + gst + stamp
+    return round(total, 2)
+
+def audit_tax_and_cost_models():
+    print("\n==================================================")
+    print("5. AUDITING INDIAN TAX & STATUTORY COST MODEL MATH")
+    print("==================================================")
+    
+    # Test F&O Futures model: 65 qty @ 24000 entry, 24050 exit (₹3250 gross profit)
+    c_fut = {'cost_model': 'fo_futures', 'brokerage_rate': 20.0}
+    cost_fut = calculate_trade_cost('buy', 24000.0, 24050.0, 65, c_fut)
+    # Expected hand-calculated:
+    # buy_turnover: 1560000, sell_turnover: 1563250, total: 3123250
+    # brok: 40.0, stt: 312.65, txn: 54.032225, sebi: 3.12325, gst: 17.4879855, stamp: 31.20 -> 458.49
+    assert abs(cost_fut - 458.49) < 0.02, f"Futures cost mismatch: got {cost_fut}, expected 458.49"
+    print(f"PASS: F&O Futures tax calculation verified (Cost: ₹{cost_fut:.2f} on ₹3.12M turnover).")
+
+    # Test Cash Intraday model: small trade 10 shares @ ₹100 entry, ₹105 exit
+    c_cash = {'cost_model': 'cash_intra', 'brokerage_rate': 20.0}
+    cost_cash = calculate_trade_cost('buy', 100.0, 105.0, 10, c_cash)
+    # turnover buy: 1000, sell: 1050. Brok is 0.03% (₹0.30 buy, ₹0.315 sell), NOT ₹20.
+    assert cost_cash < 2.0, f"Cash intraday must apply lower of 0.03% and ₹20: got {cost_cash}"
+    print(f"PASS: Cash intraday 0.03% vs ₹20 brokerage cap verified (Cost: ₹{cost_cash:.2f}).")
+
+    # Test Zero and Flat models
+    assert calculate_trade_cost('buy', 100.0, 105.0, 10, {'cost_model': 'zero'}) == 0.0
+    assert calculate_trade_cost('buy', 100.0, 105.0, 10, {'cost_model': 'flat_custom', 'cost': 15.5}) == 15.5
+    print("PASS: Zero and Flat custom cost overrides verified.")
+
+def audit_multi_target_simultaneous_fill():
+    print("\n==================================================")
+    print("6. AUDITING MULTI-TARGET EXTREME CHASE RESOLUTION")
+    print("==================================================")
+    # A scenario where multiple positions are held and hit target on the same candle:
+    # 3 BUY positions entered at 100, 95, 90.
+    # Step = 5, Square = 5. Targets: 105, 100, 95.
+    # Violent bar hits High 107. All 3 positions hit target!
+    # Extreme target must resolve to 105 (highest exit), queuing next chase entry at 105 - 5 = 100.
+    candles = [
+        {'dt': datetime.datetime(2026, 3, 1, 9, 15), 'o': 100.0, 'h': 101.0, 'l': 90.0, 'c': 90.5, 'v': 1000}, # Enters 100, 95, 90
+        {'dt': datetime.datetime(2026, 3, 1, 9, 16), 'o': 91.0, 'h': 107.0, 'l': 91.0, 'c': 106.0, 'v': 2000},  # Violent candle: exits all 3!
+        {'dt': datetime.datetime(2026, 3, 1, 9, 17), 'o': 106.0, 'h': 106.0, 'l': 99.5, 'c': 101.0, 'v': 1000}  # Dips to 99.5: fills next chase at 100
+    ]
+    cfg = {'dir': 'buy', 'step': 5.0, 'square': 5.0, 'per_qty': 50, 'total_qty': 250, 'max_lots': 5, 'cost': 10.0}
+    res = run_engine(candles, cfg, anchor=100.0)
+    assert len(res['trades']) == 3, f"Expected 3 completed scalp trades, got {len(res['trades'])}"
+    # Verify open positions: the 4th trade should be an open entry at 100
+    assert len(res['positions']) == 1, f"Expected 1 open chase position at 100, got {len(res['positions'])}"
+    assert res['positions'][0]['entry'] == 100.0, f"Chase entry should be 100, got {res['positions'][0]['entry']}"
+    print(f"PASS: Simultaneous multi-target resolution properly anchored next chase to 100.0.")
+
 if __name__ == "__main__":
     audit_html_dom()
     audit_simulation_algorithms()
     audit_flask_server()
     audit_credential_persistence()
+    audit_tax_and_cost_models()
+    audit_multi_target_simultaneous_fill()
     print("\n==================================================")
     print("🎉 DEEP SYSTEM AUDIT COMPLETE — ALL CHECKS PASSED!")
     print("==================================================")

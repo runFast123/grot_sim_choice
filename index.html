@@ -345,8 +345,9 @@
       <div class="section" style="margin-top:10px">
         <label for="selectionMode">Replay window</label>
         <select id="selectionMode">
-          <option value="both">One date + session time</option>
-          <option value="date">Whole date onward</option>
+          <option value="both" selected>Selected date + session time</option>
+          <option value="date">Selected date only (Full day)</option>
+          <option value="onward">Selected date onward (Multi-day)</option>
           <option value="time">Same time on all dates</option>
         </select>
         <label for="tradeDate">Trading date</label>
@@ -976,7 +977,7 @@
     }
   });
 
-  function setSelectionUI(){const m=$('selectionMode').value;$('tradeDate').disabled=!allBars.length||m==='time';$('startTime').disabled=m==='date';$('endTime').disabled=m==='date';}
+  function setSelectionUI(){const m=$('selectionMode').value;$('tradeDate').disabled=!allBars.length||m==='time';$('startTime').disabled=m==='date'||m==='onward';$('endTime').disabled=m==='date'||m==='onward';}
   
   $('selectionMode').addEventListener('change', () => { setSelectionUI(); if(allBars.length) prepare(); });
   $('tradeDate').addEventListener('change', () => { if(allBars.length) prepare(); });
@@ -1152,6 +1153,8 @@
         atr = (allBars[i-1].atr * (stPeriod - 1) + tr) / stPeriod;
       } else if (i === stPeriod - 1) {
         atr = trArr.slice(0, stPeriod).reduce((a,v)=>a+v,0)/stPeriod;
+      } else {
+        atr = trArr.reduce((a,v)=>a+v,0)/trArr.length;
       }
       b.atr = atr;
 
@@ -1180,8 +1183,8 @@
         const change = b.c - prevC;
         const gain = Math.max(0, change), loss = Math.max(0, -change);
         if (i < rsiPeriod) {
-          b.rsiGain = (allBars[i-1].rsiGain * i + gain) / (i + 1);
-          b.rsiLoss = (allBars[i-1].rsiLoss * i + loss) / (i + 1);
+          b.rsiGain = (allBars[i-1].rsiGain * (i - 1) + gain) / i;
+          b.rsiLoss = (allBars[i-1].rsiLoss * (i - 1) + loss) / i;
         } else {
           b.rsiGain = (allBars[i-1].rsiGain * (rsiPeriod - 1) + gain) / rsiPeriod;
           b.rsiLoss = (allBars[i-1].rsiLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
@@ -1208,7 +1211,8 @@
 
     sessionBars = allBars.filter(b => {
       const d = dateKey(b.dt), t = timeKey(b.dt);
-      if (c.selection === 'date') return d >= day;
+      if (c.selection === 'date') return d === day;
+      if (c.selection === 'onward') return d >= day;
       if (c.selection === 'time') return t >= c.start && t <= c.end;
       return d === day && t >= c.start && t <= c.end;
     });
@@ -1312,7 +1316,7 @@
       const target=p.side==='buy'?p.entry+c.square:p.entry-c.square;
       const hit=p.side==='buy'?b.h>=target:b.l<=target;
       if(hit){
-        latestTarget=target;
+        latestTarget = Number.isNaN(latestTarget) ? target : (c.dir === 'buy' ? Math.max(latestTarget, target) : Math.min(latestTarget, target));
         closeOne(p,target,b,'STEP SQUARE-OFF',c);
       }
     }
@@ -1343,7 +1347,7 @@
   function step(){
     if(!prepared||idx>=sessionBars.length){stop();return;}
     const c=config(),b=sessionBars[idx],newDay=idx===0||dateKey(sessionBars[idx-1].dt)!==dateKey(b.dt);
-    if(idx===0||(c.selection==='time'&&newDay)){
+    if(idx===0||newDay){
       anchorPrice=c.source==='market'?b.c:c.startPrice;
       resetLadder();
       if(idx>0){
@@ -1355,8 +1359,8 @@
           sessionPnl=realisedNet()-sessionStartRealised+openPnl(b.c),
           lastBar=idx===sessionBars.length-1,
           nextDay=!lastBar&&dateKey(sessionBars[idx+1].dt)!==dateKey(b.dt),
-          intradayDayEnd=c.selection!=='date'&&nextDay,
-          selectedTimeEnd=c.selection!=='date'&&timeKey(b.dt)>=c.end;
+          intradayDayEnd=nextDay,
+          selectedTimeEnd=(c.selection==='both'||c.selection==='time')&&timeKey(b.dt)>=c.end;
           
     if(!strategyStopped&&c.maxP>0&&sessionPnl>=c.maxP){
       if(positions.length)closeAll(b,'MAX PROFIT',c);

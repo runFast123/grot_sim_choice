@@ -58,7 +58,10 @@ def run_simulation_logic_test():
             target = p['entry'] + config['square'] if p['side'] == 'buy' else p['entry'] - config['square']
             hit = b['h'] >= target if p['side'] == 'buy' else b['l'] <= target
             if hit:
-                latest_target = target
+                if latest_target is None:
+                    latest_target = target
+                else:
+                    latest_target = max(latest_target, target) if config['dir'] == 'buy' else min(latest_target, target)
                 close_one(p, target, b, 'STEP SQUARE-OFF')
         if latest_target is not None:
             last_square_off = latest_target
