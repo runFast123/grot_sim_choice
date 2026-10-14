@@ -1652,12 +1652,7 @@
       $('legChg').className = chg >= 0 ? 'green' : 'red';
     }
     if ($('legStatus')) {
-      const sessIdx = sessionBars.indexOf(bar);
-      if (sessIdx >= 0) {
-        $('legStatus').textContent = `Bar ${sessIdx + 1}/${sessionBars.length}`;
-      } else {
-        $('legStatus').textContent = `Prior Day (${dateKey(bar.dt)})`;
-      }
+      $('legStatus').textContent = `Bar ${barIdx + 1}/${totalBars}`;
     }
   }
 
@@ -1679,17 +1674,9 @@
     const c = config();
     const currentIdx = Math.min(idx, sessionBars.length - 1);
 
-    // Lookback context: If allBars has preceding days before sessionBars[0],
-    // anchor the display to allBars so that the chart shows the previous session
-    // context and continuous RSI leading into the selected date's open.
-    const sessionStartInAll = (sessionBars[0] && allBars.length) ? allBars.indexOf(sessionBars[0]) : -1;
-    const currentGlobalIdx = sessionStartInAll >= 0 ? sessionStartInAll + currentIdx : currentIdx;
-    const maxGlobalIdx = sessionStartInAll >= 0 ? sessionStartInAll + sessionBars.length - 1 : sessionBars.length - 1;
-
-    const targetEnd = chartState.autoFollow ? currentGlobalIdx : Math.max(0, Math.min(maxGlobalIdx, currentGlobalIdx - chartState.panOffset));
+    const targetEnd = chartState.autoFollow ? currentIdx : Math.max(0, Math.min(sessionBars.length - 1, currentIdx - chartState.panOffset));
     const targetStart = Math.max(0, targetEnd - chartState.visibleBars + 1);
-    const sourceBars = sessionStartInAll >= 0 ? allBars : sessionBars;
-    const a = sourceBars.slice(targetStart, targetEnd + 1);
+    const a = sessionBars.slice(targetStart, targetEnd + 1);
     
     const left = 14, right = 60, top = 36, bottomTime = 28;
     const showRSI = $('showRSI') && $('showRSI').checked;
