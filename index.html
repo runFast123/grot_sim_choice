@@ -673,8 +673,8 @@
     const val = e.target.value;
     const end = new Date();
     const start = new Date();
-    if(val === 'today') start.setDate(end.getDate());
-    else if(val === '3d') start.setDate(end.getDate() - 3);
+    if(val === 'today') start.setDate(end.getDate() - 5); // 5-day warm-up lookback for RSI and indicators
+    else if(val === '3d') start.setDate(end.getDate() - 5);
     else if(val === '7d') start.setDate(end.getDate() - 7);
     else if(val === '15d') start.setDate(end.getDate() - 15);
     else if(val === '30d') start.setDate(end.getDate() - 30);
@@ -881,10 +881,20 @@
     let loadedBars = null;
     let lastErrorMsg = '';
 
+    let fetchFromDate = fromDate;
+    if (fromDate && toDate && fromDate === toDate) {
+      const d = parseDate(fromDate) || new Date(fromDate);
+      if (d && !isNaN(d.getTime())) {
+        const lookback = new Date(d);
+        lookback.setDate(lookback.getDate() - 5);
+        fetchFromDate = dateKey(lookback);
+      }
+    }
+
     const payload = {
       segment_id: segmentId,
       token: token,
-      from_date: fromDate,
+      from_date: fetchFromDate,
       to_date: toDate,
       interval: interval
     };
@@ -921,7 +931,7 @@
       dates = [...new Set(allBars.map(b => dateKey(b.dt)))];
 
       $('tradeDate').innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
-      $('tradeDate').value = dates.at(-1);
+      $('tradeDate').value = dates.includes(toDate) ? toDate : dates.at(-1);
       $('tradeDate').disabled = false;
       setSelectionUI();
 
@@ -1176,7 +1186,7 @@
           b.rsiGain = (allBars[i-1].rsiGain * (rsiPeriod - 1) + gain) / rsiPeriod;
           b.rsiLoss = (allBars[i-1].rsiLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
         }
-        b.rsi = b.rsiLoss === 0 ? 100 : 100 - (100 / (1 + b.rsiGain / b.rsiLoss));
+        b.rsi = (b.rsiGain === 0 && b.rsiLoss === 0) ? 50 : (b.rsiLoss === 0 ? 100 : 100 - (100 / (1 + b.rsiGain / b.rsiLoss)));
       }
     });
   }
@@ -1642,7 +1652,12 @@
       $('legChg').className = chg >= 0 ? 'green' : 'red';
     }
     if ($('legStatus')) {
-      $('legStatus').textContent = `Bar ${barIdx + 1}/${totalBars}`;
+      const sessIdx = sessionBars.indexOf(bar);
+      if (sessIdx >= 0) {
+        $('legStatus').textContent = `Bar ${sessIdx + 1}/${sessionBars.length}`;
+      } else {
+        $('legStatus').textContent = `Prior Day (${dateKey(bar.dt)})`;
+      }
     }
   }
 
@@ -1664,9 +1679,17 @@
     const c = config();
     const currentIdx = Math.min(idx, sessionBars.length - 1);
 
-    const targetEnd = chartState.autoFollow ? currentIdx : Math.max(0, Math.min(sessionBars.length - 1, currentIdx - chartState.panOffset));
+    // Lookback context: If allBars has preceding days before sessionBars[0],
+    // anchor the display to allBars so that the chart shows the previous session
+    // context and continuous RSI leading into the selected date's open.
+    const sessionStartInAll = (sessionBars[0] && allBars.length) ? allBars.indexOf(sessionBars[0]) : -1;
+    const currentGlobalIdx = sessionStartInAll >= 0 ? sessionStartInAll + currentIdx : currentIdx;
+    const maxGlobalIdx = sessionStartInAll >= 0 ? sessionStartInAll + sessionBars.length - 1 : sessionBars.length - 1;
+
+    const targetEnd = chartState.autoFollow ? currentGlobalIdx : Math.max(0, Math.min(maxGlobalIdx, currentGlobalIdx - chartState.panOffset));
     const targetStart = Math.max(0, targetEnd - chartState.visibleBars + 1);
-    const a = sessionBars.slice(targetStart, targetEnd + 1);
+    const sourceBars = sessionStartInAll >= 0 ? allBars : sessionBars;
+    const a = sourceBars.slice(targetStart, targetEnd + 1);
     
     const left = 14, right = 60, top = 36, bottomTime = 28;
     const showRSI = $('showRSI') && $('showRSI').checked;
@@ -1722,11 +1745,23 @@
       x.fillStyle = '#475569'; x.font = '10px "JetBrains Mono", monospace';
       x.fillText('RSI', left + 4, volBottom + 12);
       
-      x.strokeStyle = 'rgba(1, 83, 184, 0.2)'; x.setLineDash([4,4]);
+      // Neutral zone shading (between 30 and 70)
+      x.fillStyle = 'rgba(1, 83, 184, 0.03)';
+      x.fillRect(left, RsiY(70), W - left - right, RsiY(30) - RsiY(70));
+
+      // Overbought 70 & Oversold 30 levels
+      x.strokeStyle = 'rgba(1, 83, 184, 0.25)'; x.setLineDash([4,4]);
       x.beginPath(); x.moveTo(left, RsiY(70)); x.lineTo(W - right, RsiY(70)); x.stroke();
       x.beginPath(); x.moveTo(left, RsiY(30)); x.lineTo(W - right, RsiY(30)); x.stroke();
+
+      // Midline 50 level
+      x.strokeStyle = 'rgba(100, 116, 139, 0.35)'; x.setLineDash([2,3]);
+      x.beginPath(); x.moveTo(left, RsiY(50)); x.lineTo(W - right, RsiY(50)); x.stroke();
+
       x.setLineDash([]);
+      x.fillStyle = '#64748b';
       x.fillText('70', W - right + 8, RsiY(70) + 4);
+      x.fillText('50', W - right + 8, RsiY(50) + 4);
       x.fillText('30', W - right + 8, RsiY(30) + 4);
     }
 
@@ -1868,6 +1903,11 @@
         x.beginPath(); x.moveTo(left, snapY); x.lineTo(W - right, snapY); x.stroke();
         x.setLineDash([]); x.fillStyle = '#0F172A'; x.fillRect(W - right, snapY - 10, right, 20);
         x.fillStyle = '#FFFFFF'; x.font = 'bold 11px "JetBrains Mono", monospace'; x.fillText(fmt(hoverPrice), W - right + 6, snapY + 4);
+      } else if (showRSI && snapY > volBottom && snapY <= rsiBottom) {
+        x.beginPath(); x.moveTo(left, snapY); x.lineTo(W - right, snapY); x.stroke();
+        const hoverRsi = Math.max(0, Math.min(100, (rsiBottom - snapY) / (rsiHeight - 10) * 100));
+        x.setLineDash([]); x.fillStyle = '#0F172A'; x.fillRect(W - right, snapY - 10, right, 20);
+        x.fillStyle = '#FFFFFF'; x.font = 'bold 11px "JetBrains Mono", monospace'; x.fillText(hoverRsi.toFixed(1), W - right + 6, snapY + 4);
       }
       x.setLineDash([]); x.fillStyle = '#0F172A'; x.fillRect(snapX - 35, H - bottomTime + 2, 70, 18);
       x.fillStyle = '#FFFFFF'; x.font = 'bold 10px "JetBrains Mono", monospace'; x.textAlign = 'center'; x.fillText(timeKey(activeBar.dt), snapX, H - bottomTime + 15); x.textAlign = 'left';
