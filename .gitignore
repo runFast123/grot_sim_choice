@@ -26,3 +26,6 @@ kkunal-*.tar.gz
 
 # Ad-hoc local probes
 test_gateways.py
+
+.vercel
+.env*
