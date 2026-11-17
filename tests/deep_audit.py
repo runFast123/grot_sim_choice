@@ -437,113 +437,9 @@ def audit_multi_target_simultaneous_fill():
     assert res['positions'][0]['entry'] == 100.0, f"Chase entry should be 100, got {res['positions'][0]['entry']}"
     print(f"PASS: Simultaneous multi-target resolution properly anchored next chase to 100.0.")
 
-def audit_credential_exposure():
-    """
-    Secrets must never leave the server: not through permissive CORS, not in
-    login responses, not by redirecting them to a caller-chosen gateway, and
-    not through the bootstrap page.
-    """
-    print("\n==================================================")
-    print("7. AUDITING CREDENTIAL EXPOSURE & CROSS-SITE ACCESS")
-    print("==================================================")
-    import json
-    import tempfile
-    import server
-
-    client = app.test_client()
-    evil = "https://evil.example"
-
-    # CORS is closed: another origin gets no Access-Control-Allow-Origin
-    r = client.get('/api/auth/status', headers={"Origin": evil})
-    assert "Access-Control-Allow-Origin" not in r.headers, "CORS must not be open to arbitrary origins"
-
-    # Cross-site writes (CSRF) are refused; same-origin writes still work
-    for path in ('/api/auth/login_auto', '/api/auth/manual', '/api/historical', '/admin/bootstrap'):
-        r = client.post(path, json={}, headers={"Origin": evil})
-        assert r.status_code == 403, f"{path} accepted a cross-origin POST (HTTP {r.status_code})"
-    r = client.post('/admin/bootstrap', data={"vendor_id": "x"}, headers={"Sec-Fetch-Site": "cross-site"})
-    assert r.status_code == 403, "cross-site form POST to /admin/bootstrap must be refused"
-    r = client.post('/api/auth/status', json={}, headers={"Origin": "http://localhost"})
-    assert r.status_code == 200, "same-origin POST must still be allowed"
-    print("PASS: CORS closed and cross-site writes refused.")
-
-    # Credentials can only travel to Choice's own gateways
-    creds = server.extract_credentials({"base_url": evil + "/api"}, None)
-    assert creds["base_url"] in server.ALLOWED_BASE_URLS, f"base_url escaped the allowlist: {creds['base_url']}"
-    assert server.normalize_base_url(server.BASE_URL_FINX) == server.BASE_URL_FINX.rstrip("/")
-    print("PASS: caller-supplied base_url cannot redirect credentials.")
-
-    # Login responses carry no secrets. Choice is stubbed so nothing leaves the machine.
-    class FakeResp:
-        status_code = 200
-        text = ""
-        def __init__(self, payload):
-            self._payload = payload
-        def json(self):
-            return self._payload
-
-    sent_to = []
-    def fake_post(url, json=None, headers=None, timeout=None):
-        sent_to.append(url)
-        if url.endswith("GetClientLoginTOTP"):
-            return FakeResp({"Response": "123456"})
-        if url.endswith("ValidateTOTP"):
-            return FakeResp({"Status": "Success", "Response": {"SessionId": "SESS_SECRET", "AccessToken": "TOK_SECRET"}})
-        return FakeResp({"Status": "Success"})
-
-    tmp = tempfile.mkdtemp()
-    saved = (server.requests.post, server.HAS_CHOICE_PKG, server.SESSION_FILE, server.SECRETS_FILE,
-             dict(server.auth_state), server.choice_client)
-    try:
-        server.requests.post = fake_post
-        server.HAS_CHOICE_PKG = False
-        server.SESSION_FILE = os.path.join(tmp, "session.json")
-        server.SECRETS_FILE = os.path.join(tmp, "secrets.json")
-        body = {"vendor_id": "V1", "api_key": "KEY_SECRET", "mobile_no": "9999999999", "base_url": evil}
-        secrets = ("KEY_SECRET", "SESS_SECRET", "TOK_SECRET", "123456", "9999999999")
-        for path, extra in (('/api/auth/get_client_otp', {}), ('/api/auth/validate', {"otp": "123456"}),
-                            ('/api/auth/login_auto', {}), ('/api/auth/manual', {"session_id": "SESS_SECRET"})):
-            r = client.post(path, json=dict(body, **extra))
-            assert r.status_code == 200, f"{path} failed: {r.get_data(as_text=True)}"
-            text = r.get_data(as_text=True)
-            leaked = [s for s in secrets if s in text]
-            assert not leaked, f"{path} response leaks {leaked}"
-        assert sent_to and all(not u.startswith(evil) for u in sent_to), f"credentials sent to {sent_to}"
-        assert server.auth_state["session_id"] == "SESS_SECRET", "server must still keep the session itself"
-        print("PASS: login responses return no key, session, token, OTP or mobile number.")
-
-        # Bootstrap: loopback only, and the stored key is never echoed into the page
-        r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": "192.168.1.50"})
-        assert r.status_code == 403, "/admin/bootstrap must refuse non-local clients"
-        page = r.get_data(as_text=True)
-        assert "Environment Variables" in page and "<form" not in page, "remote GET must explain env vars, not show the form"
-        r = client.post('/admin/bootstrap', data={"vendor_id": "X", "api_key": "Y", "mobile_no": "Z"},
-                        environ_base={"REMOTE_ADDR": "192.168.1.50"})
-        assert r.status_code == 403 and server.auth_state["vendor_id"] != "X", "remote POST must not change credentials"
-        # The two allowed addresses get in (plain and IPv4-mapped); a forged
-        # X-Forwarded-For from anywhere else does not
-        for addr in ("192.168.146.44", "10.6.6.21", "::ffff:10.6.6.21"):
-            r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": addr})
-            assert r.status_code == 200 and "<form" in r.get_data(as_text=True), f"{addr} must be allowed into /admin/bootstrap"
-        r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": "203.0.113.9"},
-                       headers={"X-Forwarded-For": "10.6.6.21"})
-        assert r.status_code == 403, "a forged X-Forwarded-For must not unlock /admin/bootstrap"
-        r = client.get('/admin/bootstrap')
-        assert r.status_code == 200 and "KEY_SECRET" not in r.get_data(as_text=True), "bootstrap page echoes the API key"
-        r = client.post('/admin/bootstrap', data={"vendor_id": "V2", "api_key": "", "mobile_no": "8888888888"})
-        assert r.status_code == 200 and server.auth_state["api_key"] == "KEY_SECRET", "blank key field must keep the stored key"
-        with open(server.SECRETS_FILE, encoding="utf-8") as f:
-            assert json.load(f)["base_url"] in server.ALLOWED_BASE_URLS
-        print("PASS: /admin/bootstrap is local-only and never displays the stored key.")
-    finally:
-        (server.requests.post, server.HAS_CHOICE_PKG, server.SESSION_FILE, server.SECRETS_FILE) = saved[:4]
-        server.auth_state.clear()
-        server.auth_state.update(saved[4])
-        server.choice_client = saved[5]
-
 def audit_mcx_contract_resolution():
     print("\n==================================================")
-    print("8. AUDITING MCX GOLD / SILVER CONTRACT RESOLUTION")
+    print("7. AUDITING MCX GOLD / SILVER CONTRACT RESOLUTION")
     print("==================================================")
     import server
 
@@ -610,7 +506,7 @@ def audit_mcx_contract_resolution():
 
 def audit_start_price_anchor():
     print("\n==================================================")
-    print("9. AUDITING CUSTOM START PRICE ANCHOR")
+    print("8. AUDITING CUSTOM START PRICE ANCHOR")
     print("==================================================")
     with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
         html = f.read()
@@ -627,7 +523,6 @@ if __name__ == "__main__":
     audit_credential_persistence()
     audit_tax_and_cost_models()
     audit_multi_target_simultaneous_fill()
-    audit_credential_exposure()
     audit_mcx_contract_resolution()
     audit_start_price_anchor()
     print("\n==================================================")

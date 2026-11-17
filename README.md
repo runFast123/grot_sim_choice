@@ -82,22 +82,6 @@ Resolution order, highest priority first:
 `secrets.json` and `.choice_session.json` are both gitignored. The static file route
 serves front-end assets only and returns 404 for `.py`, `.json`, dotfiles, and logs.
 
-Further protections:
-
-- **No secrets in responses** — login endpoints return only `status`, `message`, `vendor_id`,
-  `base_url` and `logged_in`. The API key, session id, access token, OTP and mobile number
-  stay on the server.
-- **CORS is closed** — the front end is same-origin. To allow another origin explicitly,
-  set `CORS_ORIGINS="https://a.example,https://b.example"`.
-- **Cross-site writes are refused** — POSTs whose `Origin` is another site get HTTP 403.
-- **Gateway allowlist** — credentials are only ever sent to `finxomne.choiceindia.com`
-  or `finx.choiceindia.com`; any other `base_url` falls back to the default.
-- **`/admin/bootstrap` is local-only** — it answers only requests from `127.0.0.1` / `::1`
-  and never displays the stored API key (leave the field blank to keep it). Set
-  `ALLOW_REMOTE_ADMIN=1` to lift this, e.g. when the server sits behind a reverse proxy.
-  Two extra addresses are allowed by default, `192.168.146.44` and `10.6.6.21`; replace
-  them with `ADMIN_ALLOWED_IPS="a.b.c.d,e.f.g.h"` (set it empty to allow none).
-
 ---
 
 ## Gold & silver (MCX)

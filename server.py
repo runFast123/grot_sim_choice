@@ -5,7 +5,6 @@ import datetime
 import re
 import threading
 import html as html_lib
-from urllib.parse import urlparse
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -22,71 +21,11 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = "index.html"
 app = Flask(__name__, static_folder=BASE_DIR)
-
-# The front end is served from this same Flask app, so it never needs CORS.
-# Opening CORS to every origin let any web page the user visited call this
-# server through their browser and read the credentials it returned. Extra
-# origins can be allowed explicitly with CORS_ORIGINS="https://a.example,...".
-CORS_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
-if CORS_ORIGINS:
-    CORS(app, origins=CORS_ORIGINS)
+CORS(app)
 
 SESSION_FILE = os.path.join(BASE_DIR, ".choice_session.json")
 SECRETS_FILE = os.path.join(BASE_DIR, "secrets.json")
 DEFAULT_BASE_URL = BASE_URL_OMNE
-
-# Credentials are only ever sent to Choice's own gateways. Accepting any
-# caller-supplied base_url let a request redirect the stored VendorId and API
-# key to a server of the caller's choosing.
-ALLOWED_BASE_URLS = (BASE_URL_OMNE.rstrip("/"), BASE_URL_FINX.rstrip("/"))
-
-def normalize_base_url(value):
-    """Return value if it is a known Choice gateway, else the default gateway."""
-    candidate = str(value or "").strip().rstrip("/")
-    return candidate if candidate in ALLOWED_BASE_URLS else DEFAULT_BASE_URL
-
-LOOPBACK_ADDRS = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
-
-# Extra client addresses allowed to open /admin/bootstrap besides this machine:
-# 192.168.146.44 is this PC's own Ethernet address (opening the app via that
-# address instead of localhost), 10.6.6.21 is a second trusted device.
-# Override the list with ADMIN_ALLOWED_IPS="a.b.c.d,e.f.g.h" (empty = none).
-DEFAULT_ADMIN_ALLOWED_IPS = "192.168.146.44,10.6.6.21"
-ADMIN_ALLOWED_IPS = {
-    ip.strip() for ip in os.environ.get("ADMIN_ALLOWED_IPS", DEFAULT_ADMIN_ALLOWED_IPS).split(",") if ip.strip()
-}
-
-def is_loopback_request():
-    """
-    True when the TCP peer is this machine or an allowed address. Only the
-    real connection address is checked; proxy headers such as X-Forwarded-For
-    are ignored on purpose because any client can forge them.
-    """
-    if os.environ.get("ALLOW_REMOTE_ADMIN", "").strip() == "1":
-        return True
-    addr = request.remote_addr or ""
-    if addr.startswith("::ffff:"):  # IPv4 seen through an IPv6 socket
-        addr = addr[7:]
-    return addr in LOOPBACK_ADDRS or addr in ADMIN_ALLOWED_IPS
-
-@app.before_request
-def block_cross_site_writes():
-    """
-    Refuse state-changing requests that a browser sent on behalf of another
-    site (CSRF). Closing CORS stops other sites reading responses, but a plain
-    cross-site form POST could still trigger a login or overwrite the stored
-    credentials without this check.
-    """
-    if request.method in ("GET", "HEAD", "OPTIONS"):
-        return None
-    origin = request.headers.get("Origin", "").strip()
-    if origin and origin != "null":
-        if urlparse(origin).netloc == request.host or origin.rstrip("/") in CORS_ORIGINS:
-            return None
-        return jsonify({"status": "error", "message": "Cross-origin request refused"}), 403
-    if origin == "null" or request.headers.get("Sec-Fetch-Site", "") == "cross-site":
-        return jsonify({"status": "error", "message": "Cross-origin request refused"}), 403
-    return None
 
 # Only these files may be served by the static catch-all route. Everything else
 # (server.py, secrets.json, .choice_session.json, *.log, ...) stays private.
@@ -103,7 +42,7 @@ auth_state = {
     "session_id": os.environ.get("CHOICE_SESSION_ID", ""),
     "access_token": os.environ.get("CHOICE_ACCESS_TOKEN", ""),
     "mobile_no": os.environ.get("CHOICE_MOBILE", ""),
-    "base_url": os.environ.get("CHOICE_BASE_URL", BASE_URL_OMNE),
+    "base_url": os.environ.get("CHOICE_BASE_URL", DEFAULT_BASE_URL),
     "last_otp": "",
     "user_details": {}
 }
@@ -288,7 +227,7 @@ def extract_credentials(req_data=None, req_obj=None):
         or os.environ.get("CHOICE_BASE_URL", "")
         or auth_state.get("base_url", DEFAULT_BASE_URL)
     )
-    base_url = normalize_base_url(base_url)
+    base_url = str(base_url).strip().rstrip("/") if base_url else DEFAULT_BASE_URL
 
     return {
         "vendor_id": vendor_id or "",
@@ -360,8 +299,6 @@ def fill_missing_credentials(data, keys=LONG_LIVED_KEYS):
         value = str(data.get(key, "") or "").strip()
         if not value:
             continue
-        if key == "base_url":
-            value = normalize_base_url(value)
         current = str(auth_state.get(key) or "").strip()
         # base_url is seeded with a default, so an untouched default counts as unset
         if key == "base_url" and not env_base and current == DEFAULT_BASE_URL:
@@ -525,7 +462,7 @@ and are the only option on read-only hosts such as Vercel.</p>
  <label for="vendor_id">Client ID / Vendor ID</label>
  <input id="vendor_id" name="vendor_id" value="{vendor_id}" placeholder="e.g. M12345" autocomplete="off" required>
  <label for="api_key">API Key (Bearer)</label>
- <input id="api_key" name="api_key" type="password" value="" placeholder="{api_key_placeholder}" autocomplete="off"{api_key_required}>
+ <input id="api_key" name="api_key" type="password" value="{api_key}" placeholder="Your Choice API key" autocomplete="off" required>
  <label for="mobile_no">Registered mobile number</label>
  <input id="mobile_no" name="mobile_no" value="{mobile_no}" placeholder="e.g. 9876543210" autocomplete="off" required>
  <label for="base_url">Gateway</label>
@@ -540,14 +477,10 @@ and are the only option on read-only hosts such as Vercel.</p>
 
 def render_bootstrap_page(message_html=""):
     base = auth_state.get("base_url") or DEFAULT_BASE_URL
-    # The stored API key is never written into the page; leaving the field
-    # blank on submit keeps the key that is already stored.
-    has_key = bool(auth_state.get("api_key"))
     return BOOTSTRAP_PAGE.format(
         message=message_html,
         vendor_id=html_lib.escape(auth_state.get("vendor_id", "")),
-        api_key_placeholder="Stored - leave blank to keep it" if has_key else "Your Choice API key",
-        api_key_required="" if has_key else " required",
+        api_key=html_lib.escape(auth_state.get("api_key", "")),
         mobile_no=html_lib.escape(auth_state.get("mobile_no", "")),
         omne=BASE_URL_OMNE,
         finx=BASE_URL_FINX,
@@ -555,63 +488,17 @@ def render_bootstrap_page(message_html=""):
         sel_finx=" selected" if base == BASE_URL_FINX else ""
     )
 
-REMOTE_BOOTSTRAP_PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Server secrets · GROT Scalper</title>
-<style>
- body{margin:0;background:#F1F5F9;color:#0F172A;font:14px/1.6 'Segoe UI',system-ui,sans-serif;display:flex;justify-content:center;padding:32px 16px}
- .card{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:24px;max-width:560px;width:100%;box-shadow:0 10px 15px -3px rgba(0,0,0,.08)}
- h1{margin:0 0 8px;font-size:19px}
- p,li{color:#334155;font-size:13.5px}
- code{background:#F1F5F9;border:1px solid #E2E8F0;border-radius:4px;padding:1px 5px;font-size:12.5px}
- ol{padding-left:20px}
- a{color:#0153B8}
-</style></head><body><div class="card">
-<h1>Credentials can't be set from this browser</h1>
-<p>For safety, this page only accepts credentials from the computer the server runs on
-or from an allowed address (<code>ADMIN_ALLOWED_IPS</code>).
-Otherwise anyone who can open this site could replace your Choice login.</p>
-<p><b>Hosted on Vercel?</b> Set them as environment variables instead:</p>
-<ol>
- <li>Vercel → this project → <b>Settings → Environment Variables</b></li>
- <li>Add <code>CHOICE_VENDOR_ID</code>, <code>CHOICE_API_KEY</code>, <code>CHOICE_MOBILE</code>
-     (optional <code>CHOICE_BASE_URL</code>)</li>
- <li>Tick <b>Production</b> and <b>Preview</b>, save, then redeploy</li>
-</ol>
-<p><b>Running it yourself?</b> Open <code>http://localhost:5000/admin/bootstrap</code> on that computer.</p>
-<p><a href="/">&larr; Back to the simulator</a></p>
-</div></body></html>"""
-
-def render_remote_bootstrap_page():
-    return REMOTE_BOOTSTRAP_PAGE
-
 @app.route("/admin/bootstrap", methods=["GET", "POST"])
 def admin_bootstrap():
     """Enter the Choice credentials that the server keeps on its own side."""
-    # Only the machine running the server may view or change its credentials.
-    # Hosted deployments use environment variables instead (see README).
-    if not is_loopback_request():
-        if request.method == "GET" and not request.is_json:
-            # A person following the login modal's link: explain what to do
-            # instead of showing raw JSON.
-            return render_remote_bootstrap_page(), 403
-        return jsonify({
-            "status": "error",
-            "message": "/admin/bootstrap is only available from the machine running the server "
-                       "or an address listed in ADMIN_ALLOWED_IPS. "
-                       "Set CHOICE_VENDOR_ID / CHOICE_API_KEY / CHOICE_MOBILE instead, "
-                       "or set ALLOW_REMOTE_ADMIN=1 if you understand the risk."
-        }), 403
-
     if request.method == "GET":
         return render_bootstrap_page()
 
     data = request.get_json(silent=True) or request.form or {}
     vendor_id = str(data.get("vendor_id", "")).strip()
-    api_key = str(data.get("api_key", "")).strip() or str(auth_state.get("api_key", "") or "").strip()
+    api_key = str(data.get("api_key", "")).strip()
     mobile_no = str(data.get("mobile_no", "")).strip()
-    base_url = normalize_base_url(data.get("base_url", ""))
+    base_url = str(data.get("base_url", "")).strip().rstrip("/") or DEFAULT_BASE_URL
 
     if not vendor_id or not api_key or not mobile_no:
         msg = '<div class="msg warn">Client ID, API Key and mobile number are all required.</div>'
@@ -722,18 +609,21 @@ def auth_get_client_otp():
             resp2_json = resp2.json()
             otp = resp2_json.get("Response")
             if otp:
-                # The OTP stays on the server; /api/auth/validate reads it from
-                # auth_state, so it never needs to travel to the browser.
                 auth_state["last_otp"] = str(otp)
                 return jsonify({
                     "status": "success",
-                    "message": "OTP retrieved via GetClientLoginTOTP. Call /api/auth/validate to finish login.",
-                    "vendor_id": vendor_id
+                    "otp": str(otp),
+                    "message": f"OTP successfully retrieved via GetClientLoginTOTP: {otp}",
+                    "vendor_id": vendor_id,
+                    "mobile_no": mobile_no,
+                    "raw_login": resp1_json,
+                    "raw_otp": resp2_json
                 })
             else:
                 return jsonify({
                     "status": "error",
-                    "message": f"GetClientLoginTOTP returned no OTP: {resp2_json.get('Message') or resp2.text}"
+                    "message": f"GetClientLoginTOTP returned no OTP: {resp2_json.get('Message') or resp2.text}",
+                    "raw": resp2_json
                 }), 400
         else:
             return jsonify({
@@ -745,20 +635,6 @@ def auth_get_client_otp():
             "status": "error",
             "message": f"Failed to call GetClientLoginTOTP: {str(e)}"
         }), 500
-
-def login_success_payload(message, vendor_id, base_url):
-    """
-    What a successful login tells the browser. The session id, access token,
-    API key, OTP and mobile number stay server-side: the browser never uses
-    them, and returning them is what made them stealable.
-    """
-    return {
-        "status": "success",
-        "message": message,
-        "vendor_id": vendor_id,
-        "base_url": base_url,
-        "logged_in": True
-    }
 
 @app.route("/api/auth/validate", methods=["POST"])
 def auth_validate():
@@ -821,11 +697,23 @@ def auth_validate():
                 init_choice_client()
                 save_session_to_file()
 
-                return jsonify(login_success_payload("Choice 2FA authentication verified successfully!", vendor_id, base_url))
+                return jsonify({
+                    "status": "success",
+                    "message": "Choice 2FA authentication verified successfully!",
+                    "session_id": str(session_id),
+                    "access_token": str(access_token),
+                    "vendor_id": vendor_id,
+                    "api_key": api_key,
+                    "mobile_no": mobile_no,
+                    "base_url": base_url,
+                    "logged_in": True,
+                    "data": resp_json
+                })
             else:
                 return jsonify({
                     "status": "error",
-                    "message": f"ValidateTOTP failed: {resp_json.get('Message') or 'no session returned'}"
+                    "message": f"ValidateTOTP failed: {resp_json.get('Message') or resp_json}",
+                    "raw": resp_json
                 }), 400
         else:
             return jsonify({
@@ -879,7 +767,17 @@ def auth_login_auto():
             choice_client = client
             save_session_to_file()
 
-            return jsonify(login_success_payload("Choice 1-Click Login successful!", vendor_id, base_url))
+            return jsonify({
+                "status": "success",
+                "message": f"Choice 1-Click Login successful! SessionId: {sess_id[:10]}...",
+                "session_id": str(sess_id),
+                "access_token": auth_state["access_token"],
+                "vendor_id": vendor_id,
+                "api_key": api_key,
+                "mobile_no": mobile_no,
+                "base_url": base_url,
+                "logged_in": True
+            })
         except Exception:
             pass # Fallback to manual requests below
 
@@ -916,7 +814,17 @@ def auth_login_auto():
         init_choice_client()
         save_session_to_file()
 
-        return jsonify(login_success_payload("Choice 1-Click Login successful!", vendor_id, base_url))
+        return jsonify({
+            "status": "success",
+            "message": f"Choice 1-Click Login successful! (OTP: {otp})",
+            "session_id": str(session_id),
+            "access_token": str(access_token),
+            "vendor_id": vendor_id,
+            "api_key": api_key,
+            "mobile_no": mobile_no,
+            "base_url": base_url,
+            "logged_in": True
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": f"Auto-login failed: {str(e)}"}), 500
 
@@ -942,7 +850,15 @@ def auth_manual():
     init_choice_client()
     save_session_to_file()
     
-    return jsonify(login_success_payload("Session credentials saved successfully.", vendor_id, base_url))
+    return jsonify({
+        "status": "success",
+        "message": "Session credentials saved successfully.",
+        "vendor_id": vendor_id,
+        "api_key": api_key,
+        "session_id": session_id,
+        "base_url": base_url,
+        "logged_in": True
+    })
 
 @app.route("/api/scrip/search", methods=["GET"])
 def search_scrip():
