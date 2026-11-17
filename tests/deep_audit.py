@@ -515,6 +515,11 @@ def audit_credential_exposure():
         # Bootstrap: loopback only, and the stored key is never echoed into the page
         r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": "192.168.1.50"})
         assert r.status_code == 403, "/admin/bootstrap must refuse non-local clients"
+        page = r.get_data(as_text=True)
+        assert "Environment Variables" in page and "<form" not in page, "remote GET must explain env vars, not show the form"
+        r = client.post('/admin/bootstrap', data={"vendor_id": "X", "api_key": "Y", "mobile_no": "Z"},
+                        environ_base={"REMOTE_ADDR": "192.168.1.50"})
+        assert r.status_code == 403 and server.auth_state["vendor_id"] != "X", "remote POST must not change credentials"
         r = client.get('/admin/bootstrap')
         assert r.status_code == 200 and "KEY_SECRET" not in r.get_data(as_text=True), "bootstrap page echoes the API key"
         r = client.post('/admin/bootstrap', data={"vendor_id": "V2", "api_key": "", "mobile_no": "8888888888"})

@@ -539,12 +539,46 @@ def render_bootstrap_page(message_html=""):
         sel_finx=" selected" if base == BASE_URL_FINX else ""
     )
 
+REMOTE_BOOTSTRAP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Server secrets · GROT Scalper</title>
+<style>
+ body{margin:0;background:#F1F5F9;color:#0F172A;font:14px/1.6 'Segoe UI',system-ui,sans-serif;display:flex;justify-content:center;padding:32px 16px}
+ .card{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:24px;max-width:560px;width:100%;box-shadow:0 10px 15px -3px rgba(0,0,0,.08)}
+ h1{margin:0 0 8px;font-size:19px}
+ p,li{color:#334155;font-size:13.5px}
+ code{background:#F1F5F9;border:1px solid #E2E8F0;border-radius:4px;padding:1px 5px;font-size:12.5px}
+ ol{padding-left:20px}
+ a{color:#0153B8}
+</style></head><body><div class="card">
+<h1>Credentials can't be set from this browser</h1>
+<p>For safety, this page only accepts credentials from the computer the server runs on.
+Otherwise anyone who can open this site could replace your Choice login.</p>
+<p><b>Hosted on Vercel?</b> Set them as environment variables instead:</p>
+<ol>
+ <li>Vercel → this project → <b>Settings → Environment Variables</b></li>
+ <li>Add <code>CHOICE_VENDOR_ID</code>, <code>CHOICE_API_KEY</code>, <code>CHOICE_MOBILE</code>
+     (optional <code>CHOICE_BASE_URL</code>)</li>
+ <li>Tick <b>Production</b> and <b>Preview</b>, save, then redeploy</li>
+</ol>
+<p><b>Running it yourself?</b> Open <code>http://localhost:5000/admin/bootstrap</code> on that computer.</p>
+<p><a href="/">&larr; Back to the simulator</a></p>
+</div></body></html>"""
+
+def render_remote_bootstrap_page():
+    return REMOTE_BOOTSTRAP_PAGE
+
 @app.route("/admin/bootstrap", methods=["GET", "POST"])
 def admin_bootstrap():
     """Enter the Choice credentials that the server keeps on its own side."""
     # Only the machine running the server may view or change its credentials.
     # Hosted deployments use environment variables instead (see README).
     if not is_loopback_request():
+        if request.method == "GET" and not request.is_json:
+            # A person following the login modal's link: explain what to do
+            # instead of showing raw JSON.
+            return render_remote_bootstrap_page(), 403
         return jsonify({
             "status": "error",
             "message": "/admin/bootstrap is only available from the machine running the server. "
