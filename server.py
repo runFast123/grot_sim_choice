@@ -638,6 +638,8 @@ def auth_status():
         "vendor_id": creds["vendor_id"],
         "has_session": bool(creds["session_id"]),
         "has_credentials": bool(creds["vendor_id"] and creds["api_key"] and creds["mobile_no"]),
+        # Whether the login form may save credentials (only on the server's own machine)
+        "can_save": is_loopback_request(),
         "base_url": creds["base_url"],
         "client_ip": client_ip
     })
@@ -820,10 +822,65 @@ def auth_validate():
             "message": f"ValidateTOTP connection failed: {str(e)}"
         }), 500
 
+NEEDS_CREDENTIALS_MESSAGE = "Enter your Choice Client ID, API key and registered mobile number to log in."
+HOSTED_CREDENTIALS_MESSAGE = (
+    "This hosted copy has no Choice credentials. Add CHOICE_VENDOR_ID, CHOICE_API_KEY and "
+    "CHOICE_MOBILE in Vercel > Settings > Environment Variables, or run the app on your own computer."
+)
+
+@app.route("/api/auth/connect", methods=["POST"])
+def auth_connect():
+    """
+    The single login action used by the app.
+
+    With no body it logs in using the credentials the server already holds
+    (this is what runs automatically when the page opens). With client ID /
+    API key / mobile in the body it first saves them on this computer, then
+    logs in, so first-time setup is one form and one click. Saving is
+    local-only for the same reason /admin/bootstrap is.
+    """
+    data = request.get_json(silent=True) or {}
+    supplied = {k: str(data.get(k, "") or "").strip() for k in ("vendor_id", "api_key", "mobile_no")}
+
+    if any(supplied.values()):
+        if not is_loopback_request():
+            return jsonify({"status": "error", "message": HOSTED_CREDENTIALS_MESSAGE}), 403
+        # A blank field keeps what is stored, so changing one value is easy
+        vendor_id = supplied["vendor_id"] or str(auth_state.get("vendor_id") or "").strip()
+        api_key = supplied["api_key"] or str(auth_state.get("api_key") or "").strip()
+        mobile_no = supplied["mobile_no"] or str(auth_state.get("mobile_no") or "").strip()
+        if not (vendor_id and api_key and mobile_no):
+            return jsonify({"status": "error", "needs_credentials": True, "message": NEEDS_CREDENTIALS_MESSAGE}), 400
+        changed = (vendor_id, api_key, mobile_no) != (auth_state.get("vendor_id"), auth_state.get("api_key"), auth_state.get("mobile_no"))
+        auth_state["vendor_id"], auth_state["api_key"], auth_state["mobile_no"] = vendor_id, api_key, mobile_no
+        if changed:
+            # New credentials invalidate any session issued for the old ones
+            auth_state["session_id"] = ""
+            auth_state["access_token"] = ""
+            auth_state["logged_in"] = False
+        try:
+            save_secrets_to_file(vendor_id, api_key, mobile_no, auth_state.get("base_url") or DEFAULT_BASE_URL)
+        except Exception as e:
+            print(f"Could not save secrets.json: {e}")
+
+    vendor_id = str(auth_state.get("vendor_id") or "").strip()
+    api_key = str(auth_state.get("api_key") or "").strip()
+    mobile_no = str(auth_state.get("mobile_no") or "").strip()
+    if not (vendor_id and api_key and mobile_no):
+        return jsonify({
+            "status": "error",
+            "needs_credentials": True,
+            "can_save": is_loopback_request(),
+            "message": NEEDS_CREDENTIALS_MESSAGE if is_loopback_request() else HOSTED_CREDENTIALS_MESSAGE
+        }), 400
+
+    payload, status = perform_choice_login(vendor_id, api_key, mobile_no, normalize_base_url(auth_state.get("base_url")))
+    return jsonify(payload), status
+
 @app.route("/api/auth/login_auto", methods=["POST"])
 def auth_login_auto():
     """
-    One-click automated full login:
+    One-click automated full login (kept for existing callers):
     1. LoginTOTP
     2. GetClientLoginTOTP (retrieve OTP)
     3. ValidateTOTP (exchange OTP for SessionId)
@@ -839,9 +896,15 @@ def auth_login_auto():
         return jsonify({
             "status": "error",
             "needs_bootstrap": True,
-            "message": "Server has no Choice credentials yet. Open /admin/bootstrap to store your Client ID, API Key and mobile number (or set CHOICE_VENDOR_ID / CHOICE_API_KEY / CHOICE_MOBILE)."
+            "needs_credentials": True,
+            "message": NEEDS_CREDENTIALS_MESSAGE
         }), 400
 
+    payload, status = perform_choice_login(vendor_id, api_key, mobile_no, base_url)
+    return jsonify(payload), status
+
+def perform_choice_login(vendor_id, api_key, mobile_no, base_url):
+    """Run Choice's TOTP login and store the session. Returns (payload, http_status)."""
     auth_state["mobile_no"] = mobile_no
     auth_state["vendor_id"] = vendor_id
     auth_state["api_key"] = api_key
@@ -861,7 +924,7 @@ def auth_login_auto():
             choice_client = client
             save_session_to_file()
 
-            return jsonify(login_success_payload("Choice 1-Click Login successful!", vendor_id, base_url))
+            return login_success_payload("Logged in to Choice.", vendor_id, base_url), 200
         except Exception:
             pass # Fallback to manual requests below
 
@@ -877,7 +940,7 @@ def auth_login_auto():
         r2_data = r2.json() if r2.status_code == 200 else {}
         otp = r2_data.get("Response")
         if not otp:
-            return jsonify({"status": "error", "message": f"Could not get OTP from Choice: {r2_data.get('Message') or r2.text}"}), 400
+            return {"status": "error", "message": f"Choice did not accept these credentials: {r2_data.get('Message') or r2.text or 'no OTP returned'}. Check the Client ID, API key and mobile number."}, 400
 
         # Step 3: ValidateTOTP
         r3 = requests.post(f"{base_url}/api/OpenAPIV1/ValidateTOTP", json={"MobileNo": encoded_mobile, "OTP": str(otp)}, headers=headers, timeout=15)
@@ -886,7 +949,7 @@ def auth_login_auto():
         res_data = r3_data.get("Response", {})
         session_id = res_data.get("SessionId") if isinstance(res_data, dict) else res_data
         if not session_id:
-            return jsonify({"status": "error", "message": f"ValidateTOTP failed: {r3_data.get('Message') or r3.text}"}), 400
+            return {"status": "error", "message": f"Choice login failed: {r3_data.get('Message') or r3.text or 'no session returned'}"}, 400
 
         access_token = res_data.get("AccessToken", api_key) if isinstance(res_data, dict) else api_key
 
@@ -898,9 +961,9 @@ def auth_login_auto():
         init_choice_client()
         save_session_to_file()
 
-        return jsonify(login_success_payload("Choice 1-Click Login successful!", vendor_id, base_url))
+        return login_success_payload("Logged in to Choice.", vendor_id, base_url), 200
     except Exception as e:
-        return jsonify({"status": "error", "message": f"Auto-login failed: {str(e)}"}), 500
+        return {"status": "error", "message": f"Could not reach Choice to log in: {str(e)}"}, 502
 
 @app.route("/api/auth/manual", methods=["POST"])
 def auth_manual():

@@ -502,7 +502,8 @@ def audit_credential_exposure():
         body = {"vendor_id": "V1", "api_key": "KEY_SECRET", "mobile_no": "9999999999", "base_url": evil}
         secrets = ("KEY_SECRET", "SESS_SECRET", "TOK_SECRET", "123456", "9999999999")
         for path, extra in (('/api/auth/get_client_otp', {}), ('/api/auth/validate', {"otp": "123456"}),
-                            ('/api/auth/login_auto', {}), ('/api/auth/manual', {"session_id": "SESS_SECRET"})):
+                            ('/api/auth/login_auto', {}), ('/api/auth/manual', {"session_id": "SESS_SECRET"}),
+                            ('/api/auth/connect', {})):
             r = client.post(path, json=dict(body, **extra))
             assert r.status_code == 200, f"{path} failed: {r.get_data(as_text=True)}"
             text = r.get_data(as_text=True)
@@ -511,6 +512,29 @@ def audit_credential_exposure():
         assert sent_to and all(not u.startswith(evil) for u in sent_to), f"credentials sent to {sent_to}"
         assert server.auth_state["session_id"] == "SESS_SECRET", "server must still keep the session itself"
         print("PASS: login responses return no key, session, token, OTP or mobile number.")
+
+        # One-step login: /api/auth/connect saves typed credentials (locally only) and logs in
+        with open(server.SECRETS_FILE, encoding="utf-8") as f:
+            assert json.load(f)["api_key"] == "KEY_SECRET", "connect must save the typed credentials"
+        remote = {"REMOTE_ADDR": "203.0.113.9"}
+        r = client.post('/api/auth/connect', json={"vendor_id": "HACK", "api_key": "HACK", "mobile_no": "1"}, environ_base=remote)
+        assert r.status_code == 403 and server.auth_state["vendor_id"] != "HACK", "remote clients must not set credentials"
+        assert client.get('/api/auth/status').get_json()["can_save"] is True
+        assert client.get('/api/auth/status', environ_base=remote).get_json()["can_save"] is False
+        sent_to.clear()
+        r = client.post('/api/auth/connect', json={})
+        assert r.status_code == 200 and sent_to, "connect with no body must log in with the saved credentials"
+        r = client.post('/api/auth/connect', json={"vendor_id": "V9", "api_key": "", "mobile_no": ""})
+        assert r.status_code == 200 and server.auth_state["api_key"] == "KEY_SECRET" and server.auth_state["vendor_id"] == "V9", \
+            "blank fields must keep the saved values"
+        for k in ("vendor_id", "api_key", "mobile_no", "session_id"):
+            server.auth_state[k] = ""
+        r = client.post('/api/auth/connect', json={})
+        assert r.status_code == 400 and r.get_json().get("needs_credentials"), "no saved credentials must ask for them"
+        r = client.post('/api/auth/connect', json={"vendor_id": "V1", "api_key": "", "mobile_no": ""})
+        assert r.status_code == 400, "first-time setup must require all three fields"
+        print("PASS: one-step login saves locally, reuses saved credentials, refuses remote setup.")
+        server.auth_state.update({"vendor_id": "V1", "api_key": "KEY_SECRET", "mobile_no": "9999999999"})
 
         # Bootstrap: loopback only, and the stored key is never echoed into the page
         r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": "192.168.1.50"})
