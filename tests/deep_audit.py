@@ -514,7 +514,7 @@ def audit_mcx_contract_resolution():
     for chip in ("selectIndex('NIFTY 50', 1, 26000, 65, 'NIFTY', 2)",
                  "selectIndex('BANKNIFTY', 1, 26009, 30, 'BANKNIFTY', 2)",
                  "selectIndex('FINNIFTY', 1, 26037, 60, 'FINNIFTY', 2)",
-                 "selectIndex('SENSEX', 3, 1, 20, 'SENSEX', 4)"):
+                 "selectIndex('SENSEX', 3, 19000, 20, 'SENSEX', 4)"):  # token 1 returned no candles
         assert chip in html, f"index chip missing or outdated: {chip}"
     assert not any(t in open(os.path.join(ROOT, "server.py"), encoding="utf-8").read() for t in ('"token": 100001', '"token": 100002')), \
         "placeholder MCX tokens must be gone"

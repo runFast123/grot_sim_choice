@@ -53,7 +53,7 @@ DEFAULT_SCRIPS = [
     {"symbol": "BANKNIFTY", "name": "Nifty Bank Index", "segment_id": 1, "token": 26009, "exchange": "NSE-CM", "type": "INDEX", "lot": 1},
     {"symbol": "FINNIFTY", "name": "Nifty Financial Services", "segment_id": 1, "token": 26037, "exchange": "NSE-CM", "type": "INDEX", "lot": 1},
     {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap Select", "segment_id": 1, "token": 26074, "exchange": "NSE-CM", "type": "INDEX", "lot": 1},
-    {"symbol": "SENSEX", "name": "BSE Sensex Index", "segment_id": 3, "token": 1, "exchange": "BSE-CM", "type": "INDEX", "lot": 1},
+    {"symbol": "SENSEX", "name": "BSE Sensex Index", "segment_id": 3, "token": 19000, "exchange": "BSE-CM", "type": "INDEX", "lot": 1},
     {"symbol": "RELIANCE", "name": "Reliance Industries Ltd", "segment_id": 1, "token": 2885, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
     {"symbol": "TCS", "name": "Tata Consultancy Services", "segment_id": 1, "token": 11536, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
     {"symbol": "HDFCBANK", "name": "HDFC Bank Ltd", "segment_id": 1, "token": 1333, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
@@ -1058,7 +1058,7 @@ def get_historical_candles():
                         is_avail = chart_resp.get("IsDataAvailable", False)
                         return jsonify({
                             "status": "error",
-                            "message": f"Choice OpenAPI connected successfully, but returned no candles for Token {token} on Segment {segment_id} (IsDataAvailable={is_avail}).\n\nTips:\n• For NIFTY 50 Index use Token: 26000 (Segment: 1)\n• For BANKNIFTY Index use Token: 26009 (Segment: 1)\n• For SENSEX Index use Token: 1 (Segment: 3)\n• For stocks, search by name in the Symbol box.\n• Ensure the selected date range contains active market trading days.",
+                            "message": f"Choice OpenAPI connected successfully, but returned no candles for Token {token} on Segment {segment_id} (IsDataAvailable={is_avail}).\n\nTips:\n• For NIFTY 50 Index use Token: 26000 (Segment: 1)\n• For BANKNIFTY Index use Token: 26009 (Segment: 1)\n• For SENSEX Index use Token: 19000 (Segment: 3)\n• For stocks, search by name in the Symbol box.\n• Ensure the selected date range contains active market trading days.",
                             "raw": res_json
                         }), 404
         except Exception as e:
