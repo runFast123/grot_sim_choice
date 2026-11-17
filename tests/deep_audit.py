@@ -458,6 +458,11 @@ def audit_mcx_contract_resolution():
         row("GOLDM", 575011, "04DEC26", 100, "10  GRMS ", "GRMS "),
         row("SILVERM", 483080, "30NOV26", 5, "1  KGS  ", "KGS  "),
         row("GOLD", 114, "", 1, "10  GRMS ", "KGS  ", "COM", "6"),          # spot, other segment
+        # Index futures (lot sizes from the same master): SENSEX's lot rises
+        # to 25 from the Jan-27 contract, so the nearest expiry must win
+        row("NIFTY", 61471, "23NOV26", 65, "", "", "FUTIDX", "2"),
+        row("SENSEX", 70001, "26NOV26", 20, "13  2", "", "FUTIDX", "4"),
+        row("SENSEX", 70002, "28JAN27", 25, "13  2", "", "FUTIDX", "4"),
     ]
     today = datetime.date(2026, 11, 17)
     gold = server.nearest_future("GOLD", today=today, rows=rows)
@@ -489,6 +494,11 @@ def audit_mcx_contract_resolution():
         assert r.status_code == 200, r.get_data(as_text=True)
         data = r.get_json()["result"]
         assert data["segment_id"] == 5 and data["lot"] == 30
+        r = client.get('/api/scrip/resolve?symbol=NIFTY&segment=2')
+        assert r.status_code == 200 and r.get_json()["result"]["lot"] == 65, r.get_data(as_text=True)
+        r = client.get('/api/scrip/resolve?symbol=SENSEX&segment=4')
+        assert r.status_code == 200 and r.get_json()["result"]["lot"] == 20, "SENSEX must use the nearest expiry's lot"
+        assert client.get('/api/scrip/resolve?symbol=NIFTY&segment=9').status_code == 400, "unknown segment must be rejected"
         r = client.get('/api/scrip/search?query=GOLD')
         tokens = [x["token"] for x in r.get_json()["results"]]
         assert 580051 not in tokens and 111111 not in tokens, "search must hide options and expired contracts"
@@ -500,6 +510,12 @@ def audit_mcx_contract_resolution():
         html = f.read()
     for name in ("GOLD", "SILVER"):
         assert f"selectCommodity('{name}')" in html, f"{name} preset chip missing"
+    # Index chips carry the current lot as a fallback (Nov 2026) and refresh it live
+    for chip in ("selectIndex('NIFTY 50', 1, 26000, 65, 'NIFTY', 2)",
+                 "selectIndex('BANKNIFTY', 1, 26009, 30, 'BANKNIFTY', 2)",
+                 "selectIndex('FINNIFTY', 1, 26037, 60, 'FINNIFTY', 2)",
+                 "selectIndex('SENSEX', 3, 1, 20, 'SENSEX', 4)"):
+        assert chip in html, f"index chip missing or outdated: {chip}"
     assert not any(t in open(os.path.join(ROOT, "server.py"), encoding="utf-8").read() for t in ('"token": 100001', '"token": 100002')), \
         "placeholder MCX tokens must be gone"
     print("PASS: GOLD/SILVER resolve to the nearest live future with correct per-lot multipliers.")

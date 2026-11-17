@@ -70,6 +70,7 @@ DEFAULT_SCRIPS = [
 # /api/scrip/resolve picks the nearest live contract from the scrip master.
 
 MCX_SEGMENT = "5"
+FUTURES_SEGMENTS = {"2": "NSE F&O", "4": "BSE F&O", MCX_SEGMENT: "MCX"}
 MCX_FUTURES_SYMBOLS = {"GOLD", "GOLDM", "GOLDTEN", "GOLDPETAL", "GOLDGUINEA",
                        "SILVER", "SILVERM", "SILVERMIC", "SILVER100",
                        "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC"}
@@ -926,21 +927,26 @@ def search_scrip():
 @app.route("/api/scrip/resolve", methods=["GET"])
 def resolve_scrip():
     """
-    Resolve a commodity name (GOLD, SILVER, ...) to its nearest live MCX
-    futures contract, with the lot multiplier the simulator needs.
+    Resolve a name to its nearest live futures contract, with the lot
+    multiplier the simulator needs. Defaults to MCX (GOLD, SILVER, ...);
+    segment=2 (NSE F&O) or 4 (BSE F&O) gives index futures such as NIFTY or
+    SENSEX, whose lot size the index preset chips use.
     """
     symbol = request.args.get("symbol", "").strip().upper()
+    segment = request.args.get("segment", MCX_SEGMENT).strip() or MCX_SEGMENT
     if not symbol:
         return jsonify({"status": "error", "message": "symbol is required"}), 400
+    if segment not in FUTURES_SEGMENTS:
+        return jsonify({"status": "error", "message": f"segment must be one of {sorted(FUTURES_SEGMENTS)}"}), 400
     if not getattr(scrip_master, "is_loaded", False):
         return jsonify({
             "status": "error",
             "loading": True,
             "message": "Choice contract list is still downloading (about 22 MB). Try again in a minute."
         }), 503
-    row = nearest_future(symbol)
+    row = nearest_future(symbol, segment=segment)
     if not row:
-        return jsonify({"status": "error", "message": f"No live MCX futures contract found for {symbol}."}), 404
+        return jsonify({"status": "error", "message": f"No live {FUTURES_SEGMENTS[segment]} futures contract found for {symbol}."}), 404
     return jsonify({"status": "success", "result": scrip_row_to_result(row)})
 
 def parse_date_to_1980_seconds(date_val: str, is_end: bool = False) -> int:
