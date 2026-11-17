@@ -95,6 +95,8 @@ Further protections:
 - **`/admin/bootstrap` is local-only** — it answers only requests from `127.0.0.1` / `::1`
   and never displays the stored API key (leave the field blank to keep it). Set
   `ALLOW_REMOTE_ADMIN=1` to lift this, e.g. when the server sits behind a reverse proxy.
+  Two extra addresses are allowed by default, `192.168.146.44` and `10.6.6.21`; replace
+  them with `ADMIN_ALLOWED_IPS="a.b.c.d,e.f.g.h"` (set it empty to allow none).
 
 ---
 

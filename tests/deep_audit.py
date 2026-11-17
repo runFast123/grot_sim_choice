@@ -520,6 +520,14 @@ def audit_credential_exposure():
         r = client.post('/admin/bootstrap', data={"vendor_id": "X", "api_key": "Y", "mobile_no": "Z"},
                         environ_base={"REMOTE_ADDR": "192.168.1.50"})
         assert r.status_code == 403 and server.auth_state["vendor_id"] != "X", "remote POST must not change credentials"
+        # The two allowed addresses get in (plain and IPv4-mapped); a forged
+        # X-Forwarded-For from anywhere else does not
+        for addr in ("192.168.146.44", "10.6.6.21", "::ffff:10.6.6.21"):
+            r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": addr})
+            assert r.status_code == 200 and "<form" in r.get_data(as_text=True), f"{addr} must be allowed into /admin/bootstrap"
+        r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": "203.0.113.9"},
+                       headers={"X-Forwarded-For": "10.6.6.21"})
+        assert r.status_code == 403, "a forged X-Forwarded-For must not unlock /admin/bootstrap"
         r = client.get('/admin/bootstrap')
         assert r.status_code == 200 and "KEY_SECRET" not in r.get_data(as_text=True), "bootstrap page echoes the API key"
         r = client.post('/admin/bootstrap', data={"vendor_id": "V2", "api_key": "", "mobile_no": "8888888888"})

@@ -47,11 +47,27 @@ def normalize_base_url(value):
 
 LOOPBACK_ADDRS = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
 
+# Extra client addresses allowed to open /admin/bootstrap besides this machine:
+# 192.168.146.44 is this PC's own Ethernet address (opening the app via that
+# address instead of localhost), 10.6.6.21 is a second trusted device.
+# Override the list with ADMIN_ALLOWED_IPS="a.b.c.d,e.f.g.h" (empty = none).
+DEFAULT_ADMIN_ALLOWED_IPS = "192.168.146.44,10.6.6.21"
+ADMIN_ALLOWED_IPS = {
+    ip.strip() for ip in os.environ.get("ADMIN_ALLOWED_IPS", DEFAULT_ADMIN_ALLOWED_IPS).split(",") if ip.strip()
+}
+
 def is_loopback_request():
-    """True when the TCP peer is this machine (proxy headers are ignored on purpose)."""
+    """
+    True when the TCP peer is this machine or an allowed address. Only the
+    real connection address is checked; proxy headers such as X-Forwarded-For
+    are ignored on purpose because any client can forge them.
+    """
     if os.environ.get("ALLOW_REMOTE_ADMIN", "").strip() == "1":
         return True
-    return (request.remote_addr or "") in LOOPBACK_ADDRS
+    addr = request.remote_addr or ""
+    if addr.startswith("::ffff:"):  # IPv4 seen through an IPv6 socket
+        addr = addr[7:]
+    return addr in LOOPBACK_ADDRS or addr in ADMIN_ALLOWED_IPS
 
 @app.before_request
 def block_cross_site_writes():
@@ -553,7 +569,8 @@ REMOTE_BOOTSTRAP_PAGE = """<!doctype html>
  a{color:#0153B8}
 </style></head><body><div class="card">
 <h1>Credentials can't be set from this browser</h1>
-<p>For safety, this page only accepts credentials from the computer the server runs on.
+<p>For safety, this page only accepts credentials from the computer the server runs on
+or from an allowed address (<code>ADMIN_ALLOWED_IPS</code>).
 Otherwise anyone who can open this site could replace your Choice login.</p>
 <p><b>Hosted on Vercel?</b> Set them as environment variables instead:</p>
 <ol>
@@ -581,7 +598,8 @@ def admin_bootstrap():
             return render_remote_bootstrap_page(), 403
         return jsonify({
             "status": "error",
-            "message": "/admin/bootstrap is only available from the machine running the server. "
+            "message": "/admin/bootstrap is only available from the machine running the server "
+                       "or an address listed in ADMIN_ALLOWED_IPS. "
                        "Set CHOICE_VENDOR_ID / CHOICE_API_KEY / CHOICE_MOBILE instead, "
                        "or set ALLOW_REMOTE_ADMIN=1 if you understand the risk."
         }), 403
