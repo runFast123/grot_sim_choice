@@ -505,32 +505,28 @@
 
 <!-- Choice 2FA Login Modal -->
 <div class="modal-overlay" id="authModal">
-  <div class="modal" style="max-width: 420px;">
-    <h2><span id="authTitle">Log in to Choice</span><button class="modal-close" onclick="closeAuthModal()" aria-label="Close">&times;</button></h2>
+  <div class="modal" style="max-width: 450px;">
+    <h2><span>Choice Auth / Backend Link</span><button class="modal-close" onclick="closeAuthModal()" aria-label="Close">&times;</button></h2>
+    <p class="modal-lead">Credentials are securely managed on the server. If they are missing, bootstrap them via the admin route.</p>
 
-    <!-- Shown once connected -->
-    <div id="authConnected" style="display:none">
-      <p class="modal-lead" id="authConnectedText">Connected.</p>
-      <button type="button" class="primary" id="reconnectBtn" onclick="connectChoice()" style="width:100%;padding:11px">Reconnect</button>
-      <button type="button" id="changeCredsBtn" onclick="showCredentialForm()" style="width:100%;margin-top:8px">Change Client ID / API key / mobile</button>
-    </div>
+    <div id="authStep1">
+      <div style="margin-top:14px;padding:12px;background:var(--bg-inner);border:1px solid var(--border);border-radius:10px;text-align:center">
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">Click below to securely fetch the TOTP from Choice API and complete 1-click login.</p>
+        <button class="primary" id="autoLoginBtn" onclick="autoLogin()" style="width:100%;padding:12px">1-Click Login</button>
+        <div id="modalAuthMsg" style="margin-top:10px;font-size:11.5px;color:var(--text-dim)"></div>
+      </div>
 
-    <!-- First-time setup, or changing credentials -->
-    <form id="authForm" onsubmit="event.preventDefault(); connectChoice(true);">
-      <p class="modal-lead" id="authFormLead">Enter these once. They are saved on this computer, and after that the app logs in by itself.</p>
-      <label for="loginClientId">Client ID</label>
-      <input id="loginClientId" type="text" autocomplete="username" placeholder="e.g. X12345" spellcheck="false">
-      <label for="loginApiKey">API key</label>
-      <input id="loginApiKey" type="password" autocomplete="off" placeholder="From the Choice developer portal">
-      <label for="loginMobile">Registered mobile number</label>
-      <input id="loginMobile" type="tel" inputmode="numeric" autocomplete="tel" placeholder="10-digit mobile">
-      <button type="submit" class="primary" id="loginBtn" style="width:100%;padding:11px;margin-top:14px">Log in</button>
-    </form>
-
-    <div id="authHosted" style="display:none" class="note"></div>
-    <div id="modalAuthMsg" role="status" style="margin-top:10px;font-size:12px;color:var(--text-dim)"></div>
-    <div class="note" style="margin-top:12px">
-      Your IP: <b id="modalDetectedIp">detecting…</b> — Choice only sends market data if this is set as the <b>Static IP</b> on your API key.
+      <div style="margin-top:14px;padding:10px;background:var(--bg-inner);border:1px solid var(--border);border-radius:8px;font-size:11px">
+        <div style="display:flex;justify-content:space-between;color:var(--yellow);font-weight:700;margin-bottom:4px;gap:8px">
+          <span>Server setup</span>
+          <span id="modalDetectedIp" style="color:var(--text-dim);font-weight:600">Detecting IP…</span>
+        </div>
+        <div style="color:var(--text-muted);line-height:1.4">
+          Need to set or update your API Key, Client ID or mobile number?
+          <a href="/admin/bootstrap" style="color:var(--blue);text-decoration:underline">Configure server secrets</a>.
+          Choice rejects market-data calls with <b>401</b> unless the IP above is registered as the static IP on that API key.
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -622,9 +618,7 @@
     } else {
       badge.textContent = label || 'Choice: Login';
       badge.className = 'api-badge disconnected';
-      if(side) side.innerHTML = label === 'Connecting…'
-        ? `<span style="color:var(--text-dim);font-weight:700">Connecting…</span>`
-        : `<span style="color:var(--red);font-weight:700">Not logged in</span>`;
+      if(side) side.innerHTML = `<span style="color:var(--red);font-weight:700">Not logged in</span>`;
       if(sideBtn) {
         sideBtn.textContent = 'Login';
         sideBtn.className = 'primary';
@@ -640,17 +634,14 @@
     try {
       const res = await fetch('/api/client_ip');
       const data = await res.json();
-      // Locally the server only sees 127.0.0.1 / a LAN address; Choice sees
-      // the public IP, so look that up instead of showing a local one.
-      const isLocal = /^(127\.|::1$|::ffff:127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(data.ip || '');
-      if(data.ip && !isLocal) { el.textContent = data.ip; return; }
+      if(data.ip) { el.textContent = 'IP ' + data.ip; return; }
     } catch(e) { /* backend unreachable, fall through to public lookup */ }
     try {
       const res2 = await fetch('https://api.ipify.org?format=json');
       const data2 = await res2.json();
-      el.textContent = data2.ip || 'unavailable';
+      el.textContent = data2.ip ? 'IP ' + data2.ip : 'IP unavailable';
     } catch(e2) {
-      el.textContent = 'unavailable';
+      el.textContent = 'IP unavailable';
     }
   }
 
@@ -716,136 +707,65 @@
     el.style.color = tone === 'error' ? 'var(--red)' : tone === 'ok' ? 'var(--green)' : 'var(--text-dim)';
   }
 
-  // ------------------------------------------------------------------------
-  // Login, made simple:
-  //   * First time: the login window asks for Client ID, API key and mobile.
-  //     One "Log in" click saves them on this computer and connects.
-  //   * After that: opening the app logs in automatically (Choice needs a
-  //     fresh session every trading day), so there is nothing to click.
-  // ------------------------------------------------------------------------
-  let authInfo = { connected: false, hasCredentials: false, canSave: true, vendorId: '' };
-  let connecting = null;
-
-  function renderAuthModal() {
-    const connected = authInfo.connected;
-    const needsForm = !authInfo.hasCredentials;
-    $('authTitle').textContent = connected ? 'Choice connected' : 'Log in to Choice';
-    $('authConnected').style.display = connected ? 'block' : 'none';
-    $('authConnectedText').textContent = connected
-      ? `Logged in as ${authInfo.vendorId}. The app reconnects by itself each day.`
-      : '';
-    const showForm = !connected && needsForm && authInfo.canSave;
-    $('authForm').style.display = showForm ? 'block' : 'none';
-    $('authHosted').style.display = (!authInfo.canSave && needsForm) ? 'block' : 'none';
-    if (!authInfo.canSave && needsForm) {
-      $('authHosted').textContent = 'This hosted copy has no Choice credentials. Add CHOICE_VENDOR_ID, CHOICE_API_KEY and CHOICE_MOBILE in Vercel → Settings → Environment Variables, or run the app on your own computer.';
-    }
-    // Saved credentials but not connected (e.g. login failed): offer a retry
-    if (!connected && !needsForm) {
-      $('authConnected').style.display = 'block';
-      $('authConnectedText').textContent = `Saved login for ${authInfo.vendorId || 'your account'}.`;
-      $('reconnectBtn').textContent = 'Log in';
-    } else {
-      $('reconnectBtn').textContent = 'Reconnect';
-    }
-    $('changeCredsBtn').style.display = authInfo.canSave ? '' : 'none';
-    if (authInfo.vendorId && !$('loginClientId').value) $('loginClientId').value = authInfo.vendorId;
-  }
-
-  window.showCredentialForm = () => {
-    $('authConnected').style.display = 'none';
-    $('authForm').style.display = 'block';
-    $('authTitle').textContent = 'Change login details';
-    $('authFormLead').textContent = 'Change what you need. Leave a field blank to keep the saved value.';
-    $('loginApiKey').placeholder = 'Leave blank to keep the saved key';
-    $('loginMobile').placeholder = 'Leave blank to keep the saved number';
-    $('loginClientId').focus();
-  };
-
   async function checkAuthStatus() {
     try {
       const res = await fetch('/api/auth/status');
       const data = await res.json();
-      authInfo = {
-        connected: !!(data.logged_in && data.has_session),
-        hasCredentials: !!data.has_credentials,
-        canSave: data.can_save !== false,
-        vendorId: data.vendor_id || ''
-      };
-      setAuthUi(authInfo.connected, authInfo.vendorId || 'Login');
-      renderAuthModal();
-      return authInfo;
+
+      if(data.logged_in && data.has_session) {
+        if ($('appStatus')) $('appStatus').textContent = `Connected (Vendor: ${data.vendor_id})`;
+        setModalAuthMsg('');
+      } else {
+        if ($('appStatus')) $('appStatus').textContent = 'Choice API Not Connected (Requires Login)';
+        if (data.has_credentials === false) {
+          setModalAuthMsg('No credentials stored on the server yet — configure them below first.', 'error');
+        } else {
+          // Choice issues a session per trading day, so one login each day is
+          // expected. The stored API key is reused — nothing to re-enter.
+          setModalAuthMsg('Credentials stored. Choice sessions last one trading day — click above to start today’s.', '');
+        }
+      }
+      if (typeof setAuthUi === 'function') setAuthUi(data.logged_in && data.has_session, data.vendor_id || 'Login');
     } catch(e) {
       console.warn('Backend offline', e);
-      if ($('appStatus')) $('appStatus').textContent = 'Cannot reach the server (is server.py running?)';
-      setAuthUi(false, 'Offline');
-      return null;
+      if ($('appStatus')) $('appStatus').textContent = 'Cannot reach backend server.py';
+      if (typeof setAuthUi === 'function') setAuthUi(false, 'Offline');
     }
   }
 
-  // The one login action. withForm=true sends what was typed in the form.
-  window.connectChoice = (withForm = false) => {
-    if (connecting) return connecting;
-    const body = {};
-    if (withForm) {
-      body.vendor_id = $('loginClientId').value.trim();
-      body.api_key = $('loginApiKey').value.trim();
-      body.mobile_no = $('loginMobile').value.replace(/\D/g, '');
-      if (!authInfo.hasCredentials && (!body.vendor_id || !body.api_key || !body.mobile_no)) {
-        setModalAuthMsg('Please fill in all three fields.', 'error');
-        return Promise.resolve(false);
+  checkAuthStatus();
+  setInterval(checkAuthStatus, 60000); // Check every minute
+
+  window.autoLogin = async () => {
+    const btn = $('autoLoginBtn');
+    if(btn) { btn.disabled = true; btn.textContent = 'Logging in via Server...'; }
+    if ($('appStatus')) $('appStatus').textContent = 'Server Authenticating with Choice API (GetClientLoginTOTP)...';
+
+    try {
+      const res = await fetch('/api/auth/login_auto', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if(data.status === 'success') {
+        setModalAuthMsg(data.message || 'Login successful.', 'ok');
+        closeAuthModal();
+        checkAuthStatus();
+        if ($('appStatus')) $('appStatus').textContent = 'Choice API Connected - Ready to fetch';
+      } else if(data.needs_bootstrap) {
+        setModalAuthMsg(data.message, 'error');
+        if ($('appStatus')) $('appStatus').textContent = 'Server has no Choice credentials yet';
+      } else {
+        setModalAuthMsg('Login failed: ' + (data.message || 'unknown error'), 'error');
+        if ($('appStatus')) $('appStatus').textContent = 'Login error: ' + data.message;
       }
+    } catch(e) {
+      setModalAuthMsg('Login request failed: ' + e.message, 'error');
+    } finally {
+      if(btn) { btn.disabled = false; btn.textContent = '1-Click Login'; }
     }
-    const buttons = [$('loginBtn'), $('reconnectBtn')];
-    buttons.forEach(b => { if (b) b.disabled = true; });
-    setModalAuthMsg('Logging in to Choice…', '');
-    setAuthUi(false, 'Connecting…');
-    if ($('appStatus')) $('appStatus').textContent = 'Logging in to Choice…';
-
-    connecting = (async () => {
-      try {
-        const res = await fetch('/api/auth/connect', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(body)
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-          $('loginApiKey').value = '';
-          $('loginMobile').value = '';
-          setModalAuthMsg('', '');
-          await checkAuthStatus();
-          closeAuthModal();
-          if ($('appStatus')) $('appStatus').textContent = 'Connected to Choice · pick a symbol and fetch candles';
-          return true;
-        }
-        await checkAuthStatus();
-        setModalAuthMsg(data.message || 'Login failed.', 'error');
-        if ($('appStatus')) $('appStatus').textContent = 'Not logged in · click the Choice badge';
-        openAuthModal();
-        return false;
-      } catch(e) {
-        setModalAuthMsg('Could not reach the server: ' + e.message, 'error');
-        setAuthUi(false, 'Offline');
-        return false;
-      } finally {
-        buttons.forEach(b => { if (b) b.disabled = false; });
-        connecting = null;
-      }
-    })();
-    return connecting;
   };
-  window.autoLogin = () => window.connectChoice(false); // kept for old buttons/bookmarks
-
-  // On page load: connect automatically if credentials are saved, otherwise
-  // open the login window so first-time setup is obvious.
-  (async () => {
-    const info = await checkAuthStatus();
-    if (!info || info.connected) return;
-    if (info.hasCredentials) window.connectChoice(false);
-    else openAuthModal();
-  })();
-  setInterval(checkAuthStatus, 60000); // keep the badge honest
 
   // Symbol Autocomplete search
   const symbolInput = $('symbolInput');
@@ -1024,7 +944,7 @@
       interval: interval
     };
 
-    const requestCandles = async () => {
+    try {
       const res = await fetch('/api/historical', {
         method: 'POST',
         headers: {
@@ -1032,19 +952,7 @@
         },
         body: JSON.stringify(payload)
       });
-      return { res, data: await res.json() };
-    };
-
-    try {
-      let { res, data } = await requestCandles();
-      // Choice sessions expire daily. If the session was refused, log in
-      // again by ourselves and retry once before reporting an error.
-      if (res.status === 401 && authInfo.hasCredentials) {
-        $('appStatus').textContent = 'Session expired · logging in to Choice again…';
-        if (await window.connectChoice(false)) {
-          ({ res, data } = await requestCandles());
-        }
-      }
+      const data = await res.json();
 
       if(data.status === 'success' && data.bars && data.bars.length) {
         loadedBars = data.bars.map(b => ({
