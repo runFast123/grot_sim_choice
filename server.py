@@ -2,8 +2,10 @@ import os
 import json
 import base64
 import datetime
+import re
 import threading
 import html as html_lib
+from urllib.parse import urlparse
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -20,11 +22,55 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = "index.html"
 app = Flask(__name__, static_folder=BASE_DIR)
-CORS(app)
+
+# The front end is served from this same Flask app, so it never needs CORS.
+# Opening CORS to every origin let any web page the user visited call this
+# server through their browser and read the credentials it returned. Extra
+# origins can be allowed explicitly with CORS_ORIGINS="https://a.example,...".
+CORS_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+if CORS_ORIGINS:
+    CORS(app, origins=CORS_ORIGINS)
 
 SESSION_FILE = os.path.join(BASE_DIR, ".choice_session.json")
 SECRETS_FILE = os.path.join(BASE_DIR, "secrets.json")
 DEFAULT_BASE_URL = BASE_URL_OMNE
+
+# Credentials are only ever sent to Choice's own gateways. Accepting any
+# caller-supplied base_url let a request redirect the stored VendorId and API
+# key to a server of the caller's choosing.
+ALLOWED_BASE_URLS = (BASE_URL_OMNE.rstrip("/"), BASE_URL_FINX.rstrip("/"))
+
+def normalize_base_url(value):
+    """Return value if it is a known Choice gateway, else the default gateway."""
+    candidate = str(value or "").strip().rstrip("/")
+    return candidate if candidate in ALLOWED_BASE_URLS else DEFAULT_BASE_URL
+
+LOOPBACK_ADDRS = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
+
+def is_loopback_request():
+    """True when the TCP peer is this machine (proxy headers are ignored on purpose)."""
+    if os.environ.get("ALLOW_REMOTE_ADMIN", "").strip() == "1":
+        return True
+    return (request.remote_addr or "") in LOOPBACK_ADDRS
+
+@app.before_request
+def block_cross_site_writes():
+    """
+    Refuse state-changing requests that a browser sent on behalf of another
+    site (CSRF). Closing CORS stops other sites reading responses, but a plain
+    cross-site form POST could still trigger a login or overwrite the stored
+    credentials without this check.
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    origin = request.headers.get("Origin", "").strip()
+    if origin and origin != "null":
+        if urlparse(origin).netloc == request.host or origin.rstrip("/") in CORS_ORIGINS:
+            return None
+        return jsonify({"status": "error", "message": "Cross-origin request refused"}), 403
+    if origin == "null" or request.headers.get("Sec-Fetch-Site", "") == "cross-site":
+        return jsonify({"status": "error", "message": "Cross-origin request refused"}), 403
+    return None
 
 # Only these files may be served by the static catch-all route. Everything else
 # (server.py, secrets.json, .choice_session.json, *.log, ...) stays private.
@@ -41,7 +87,7 @@ auth_state = {
     "session_id": os.environ.get("CHOICE_SESSION_ID", ""),
     "access_token": os.environ.get("CHOICE_ACCESS_TOKEN", ""),
     "mobile_no": os.environ.get("CHOICE_MOBILE", ""),
-    "base_url": os.environ.get("CHOICE_BASE_URL", DEFAULT_BASE_URL),
+    "base_url": os.environ.get("CHOICE_BASE_URL", BASE_URL_OMNE),
     "last_otp": "",
     "user_details": {}
 }
@@ -62,11 +108,94 @@ DEFAULT_SCRIPS = [
     {"symbol": "TATAMOTORS", "name": "Tata Motors Ltd", "segment_id": 1, "token": 3456, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
     {"symbol": "AXISBANK", "name": "Axis Bank Ltd", "segment_id": 1, "token": 5900, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
     {"symbol": "KOTAKBANK", "name": "Kotak Mahindra Bank", "segment_id": 1, "token": 1922, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
-    {"symbol": "LT", "name": "Larsen & Toubro Ltd", "segment_id": 1, "token": 11483, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
-    {"symbol": "CRUDEOIL", "name": "Crude Oil Commodity", "segment_id": 5, "token": 100000, "exchange": "MCX", "type": "COMMODITY", "lot": 100},
-    {"symbol": "GOLD", "name": "Gold Commodity", "segment_id": 5, "token": 100001, "exchange": "MCX", "type": "COMMODITY", "lot": 100},
-    {"symbol": "SILVER", "name": "Silver Commodity", "segment_id": 5, "token": 100002, "exchange": "MCX", "type": "COMMODITY", "lot": 30}
+    {"symbol": "LT", "name": "Larsen & Toubro Ltd", "segment_id": 1, "token": 11483, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1}
 ]
+# MCX commodities (GOLD, SILVER, CRUDEOIL, ...) are not listed here: every
+# futures expiry has its own token, so a fixed token goes stale within a month.
+# /api/scrip/resolve picks the nearest live contract from the scrip master.
+
+MCX_SEGMENT = "5"
+MCX_FUTURES_SYMBOLS = {"GOLD", "GOLDM", "GOLDTEN", "GOLDPETAL", "GOLDGUINEA",
+                       "SILVER", "SILVERM", "SILVERMIC", "SILVER100",
+                       "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC"}
+OPTION_INSTRUMENTS = {"OPTFUT", "OPTIDX", "OPTSTK", "OPTCUR", "OPTBLN"}
+UNIT_IN_GRAMS = {"GRMS": 1.0, "GRAMS": 1.0, "GMS": 1.0, "KGS": 1000.0, "KG": 1000.0}
+
+def parse_expiry(value):
+    """Scrip master expiries look like '04DEC26'. Returns a date or None."""
+    text = str(value or "").strip().upper()
+    if not text:
+        return None
+    for fmt in ("%d%b%y", "%d%b%Y"):
+        try:
+            return datetime.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def _parse_unit(text):
+    """'10  GRMS ' -> (10.0, 'GRMS'); 'KGS  ' -> (1.0, 'KGS')."""
+    match = re.match(r"\s*([\d.]+)?\s*([A-Za-z]+)", str(text or ""))
+    if not match:
+        return None, ""
+    return float(match.group(1) or 1), match.group(2).upper()
+
+def contract_multiplier(row):
+    """
+    Rupees of P&L per one-rupee move for one lot. MCX quotes GOLD per 10 g but
+    trades it in 1 kg lots, so one lot moves 100x the quoted price; SILVER is
+    quoted per kg in 30 kg lots, so 30x. MarketLot alone (1 for GOLD) would
+    understate gold P&L a hundredfold.
+    """
+    try:
+        lot = float(row.get("MarketLot") or 1)
+    except (TypeError, ValueError):
+        lot = 1.0
+    price_qty, price_unit = _parse_unit(row.get("PriceUnit"))
+    _, qty_unit = _parse_unit(row.get("QtyUnit"))
+    if not price_qty or not price_unit or not qty_unit:
+        return max(1, int(round(lot)))
+    if price_unit in UNIT_IN_GRAMS and qty_unit in UNIT_IN_GRAMS:
+        mult = lot * UNIT_IN_GRAMS[qty_unit] / (price_qty * UNIT_IN_GRAMS[price_unit])
+    elif price_unit == qty_unit:
+        mult = lot / price_qty
+    else:
+        mult = lot
+    return max(1, int(round(mult)))
+
+def scrip_row_to_result(row):
+    expiry = parse_expiry(row.get("Expiry"))
+    instrument = str(row.get("Instrument") or "").strip()
+    return {
+        "symbol": str(row.get("Symbol") or "").strip(),
+        "name": str(row.get("SecName") or row.get("SecDesc") or "").strip(),
+        "segment_id": int(row.get("Segment") or 1),
+        "token": int(row.get("Token")),
+        "exchange": str(row.get("Exchange") or "").strip(),
+        "type": instrument or str(row.get("Series") or "EQUITY").strip(),
+        "expiry": expiry.isoformat() if expiry else "",
+        "lot": contract_multiplier(row)
+    }
+
+def nearest_future(symbol, segment=MCX_SEGMENT, today=None, rows=None):
+    """The live futures contract for symbol with the closest expiry, or None."""
+    today = today or datetime.date.today()
+    rows = rows if rows is not None else getattr(scrip_master, "all_rows", [])
+    symbol = str(symbol or "").strip().upper()
+    best, best_expiry = None, None
+    for row in rows:
+        if str(row.get("Segment", "")).strip() != segment:
+            continue
+        if str(row.get("Symbol", "")).strip().upper() != symbol:
+            continue
+        if not str(row.get("Instrument", "")).strip().upper().startswith("FUT"):
+            continue
+        expiry = parse_expiry(row.get("Expiry"))
+        if not expiry or expiry < today:
+            continue
+        if best_expiry is None or expiry < best_expiry:
+            best, best_expiry = row, expiry
+    return best
 
 def encode_mobile(mobile_no: str) -> str:
     return base64.b64encode(str(mobile_no).strip().encode('utf-8')).decode('utf-8')
@@ -143,7 +272,7 @@ def extract_credentials(req_data=None, req_obj=None):
         or os.environ.get("CHOICE_BASE_URL", "")
         or auth_state.get("base_url", DEFAULT_BASE_URL)
     )
-    base_url = str(base_url).strip().rstrip("/") if base_url else DEFAULT_BASE_URL
+    base_url = normalize_base_url(base_url)
 
     return {
         "vendor_id": vendor_id or "",
@@ -215,6 +344,8 @@ def fill_missing_credentials(data, keys=LONG_LIVED_KEYS):
         value = str(data.get(key, "") or "").strip()
         if not value:
             continue
+        if key == "base_url":
+            value = normalize_base_url(value)
         current = str(auth_state.get(key) or "").strip()
         # base_url is seeded with a default, so an untouched default counts as unset
         if key == "base_url" and not env_base and current == DEFAULT_BASE_URL:
@@ -378,7 +509,7 @@ and are the only option on read-only hosts such as Vercel.</p>
  <label for="vendor_id">Client ID / Vendor ID</label>
  <input id="vendor_id" name="vendor_id" value="{vendor_id}" placeholder="e.g. M12345" autocomplete="off" required>
  <label for="api_key">API Key (Bearer)</label>
- <input id="api_key" name="api_key" type="password" value="{api_key}" placeholder="Your Choice API key" autocomplete="off" required>
+ <input id="api_key" name="api_key" type="password" value="" placeholder="{api_key_placeholder}" autocomplete="off"{api_key_required}>
  <label for="mobile_no">Registered mobile number</label>
  <input id="mobile_no" name="mobile_no" value="{mobile_no}" placeholder="e.g. 9876543210" autocomplete="off" required>
  <label for="base_url">Gateway</label>
@@ -393,10 +524,14 @@ and are the only option on read-only hosts such as Vercel.</p>
 
 def render_bootstrap_page(message_html=""):
     base = auth_state.get("base_url") or DEFAULT_BASE_URL
+    # The stored API key is never written into the page; leaving the field
+    # blank on submit keeps the key that is already stored.
+    has_key = bool(auth_state.get("api_key"))
     return BOOTSTRAP_PAGE.format(
         message=message_html,
         vendor_id=html_lib.escape(auth_state.get("vendor_id", "")),
-        api_key=html_lib.escape(auth_state.get("api_key", "")),
+        api_key_placeholder="Stored - leave blank to keep it" if has_key else "Your Choice API key",
+        api_key_required="" if has_key else " required",
         mobile_no=html_lib.escape(auth_state.get("mobile_no", "")),
         omne=BASE_URL_OMNE,
         finx=BASE_URL_FINX,
@@ -407,14 +542,24 @@ def render_bootstrap_page(message_html=""):
 @app.route("/admin/bootstrap", methods=["GET", "POST"])
 def admin_bootstrap():
     """Enter the Choice credentials that the server keeps on its own side."""
+    # Only the machine running the server may view or change its credentials.
+    # Hosted deployments use environment variables instead (see README).
+    if not is_loopback_request():
+        return jsonify({
+            "status": "error",
+            "message": "/admin/bootstrap is only available from the machine running the server. "
+                       "Set CHOICE_VENDOR_ID / CHOICE_API_KEY / CHOICE_MOBILE instead, "
+                       "or set ALLOW_REMOTE_ADMIN=1 if you understand the risk."
+        }), 403
+
     if request.method == "GET":
         return render_bootstrap_page()
 
     data = request.get_json(silent=True) or request.form or {}
     vendor_id = str(data.get("vendor_id", "")).strip()
-    api_key = str(data.get("api_key", "")).strip()
+    api_key = str(data.get("api_key", "")).strip() or str(auth_state.get("api_key", "") or "").strip()
     mobile_no = str(data.get("mobile_no", "")).strip()
-    base_url = str(data.get("base_url", "")).strip().rstrip("/") or DEFAULT_BASE_URL
+    base_url = normalize_base_url(data.get("base_url", ""))
 
     if not vendor_id or not api_key or not mobile_no:
         msg = '<div class="msg warn">Client ID, API Key and mobile number are all required.</div>'
@@ -525,21 +670,18 @@ def auth_get_client_otp():
             resp2_json = resp2.json()
             otp = resp2_json.get("Response")
             if otp:
+                # The OTP stays on the server; /api/auth/validate reads it from
+                # auth_state, so it never needs to travel to the browser.
                 auth_state["last_otp"] = str(otp)
                 return jsonify({
                     "status": "success",
-                    "otp": str(otp),
-                    "message": f"OTP successfully retrieved via GetClientLoginTOTP: {otp}",
-                    "vendor_id": vendor_id,
-                    "mobile_no": mobile_no,
-                    "raw_login": resp1_json,
-                    "raw_otp": resp2_json
+                    "message": "OTP retrieved via GetClientLoginTOTP. Call /api/auth/validate to finish login.",
+                    "vendor_id": vendor_id
                 })
             else:
                 return jsonify({
                     "status": "error",
-                    "message": f"GetClientLoginTOTP returned no OTP: {resp2_json.get('Message') or resp2.text}",
-                    "raw": resp2_json
+                    "message": f"GetClientLoginTOTP returned no OTP: {resp2_json.get('Message') or resp2.text}"
                 }), 400
         else:
             return jsonify({
@@ -551,6 +693,20 @@ def auth_get_client_otp():
             "status": "error",
             "message": f"Failed to call GetClientLoginTOTP: {str(e)}"
         }), 500
+
+def login_success_payload(message, vendor_id, base_url):
+    """
+    What a successful login tells the browser. The session id, access token,
+    API key, OTP and mobile number stay server-side: the browser never uses
+    them, and returning them is what made them stealable.
+    """
+    return {
+        "status": "success",
+        "message": message,
+        "vendor_id": vendor_id,
+        "base_url": base_url,
+        "logged_in": True
+    }
 
 @app.route("/api/auth/validate", methods=["POST"])
 def auth_validate():
@@ -613,23 +769,11 @@ def auth_validate():
                 init_choice_client()
                 save_session_to_file()
 
-                return jsonify({
-                    "status": "success",
-                    "message": "Choice 2FA authentication verified successfully!",
-                    "session_id": str(session_id),
-                    "access_token": str(access_token),
-                    "vendor_id": vendor_id,
-                    "api_key": api_key,
-                    "mobile_no": mobile_no,
-                    "base_url": base_url,
-                    "logged_in": True,
-                    "data": resp_json
-                })
+                return jsonify(login_success_payload("Choice 2FA authentication verified successfully!", vendor_id, base_url))
             else:
                 return jsonify({
                     "status": "error",
-                    "message": f"ValidateTOTP failed: {resp_json.get('Message') or resp_json}",
-                    "raw": resp_json
+                    "message": f"ValidateTOTP failed: {resp_json.get('Message') or 'no session returned'}"
                 }), 400
         else:
             return jsonify({
@@ -683,17 +827,7 @@ def auth_login_auto():
             choice_client = client
             save_session_to_file()
 
-            return jsonify({
-                "status": "success",
-                "message": f"Choice 1-Click Login successful! SessionId: {sess_id[:10]}...",
-                "session_id": str(sess_id),
-                "access_token": auth_state["access_token"],
-                "vendor_id": vendor_id,
-                "api_key": api_key,
-                "mobile_no": mobile_no,
-                "base_url": base_url,
-                "logged_in": True
-            })
+            return jsonify(login_success_payload("Choice 1-Click Login successful!", vendor_id, base_url))
         except Exception:
             pass # Fallback to manual requests below
 
@@ -730,17 +864,7 @@ def auth_login_auto():
         init_choice_client()
         save_session_to_file()
 
-        return jsonify({
-            "status": "success",
-            "message": f"Choice 1-Click Login successful! (OTP: {otp})",
-            "session_id": str(session_id),
-            "access_token": str(access_token),
-            "vendor_id": vendor_id,
-            "api_key": api_key,
-            "mobile_no": mobile_no,
-            "base_url": base_url,
-            "logged_in": True
-        })
+        return jsonify(login_success_payload("Choice 1-Click Login successful!", vendor_id, base_url))
     except Exception as e:
         return jsonify({"status": "error", "message": f"Auto-login failed: {str(e)}"}), 500
 
@@ -766,15 +890,7 @@ def auth_manual():
     init_choice_client()
     save_session_to_file()
     
-    return jsonify({
-        "status": "success",
-        "message": "Session credentials saved successfully.",
-        "vendor_id": vendor_id,
-        "api_key": api_key,
-        "session_id": session_id,
-        "base_url": base_url,
-        "logged_in": True
-    })
+    return jsonify(login_success_payload("Session credentials saved successfully.", vendor_id, base_url))
 
 @app.route("/api/scrip/search", methods=["GET"])
 def search_scrip():
@@ -783,32 +899,44 @@ def search_scrip():
     segment = request.args.get("segment", "").strip()
 
     results = []
-    
+    today = datetime.date.today()
+    wants_options = bool(re.search(r"\d|CE$|PE$", query))
+
     # 1. Search dynamically from Choice ScripMaster
     if query and getattr(scrip_master, "is_loaded", False):
-        matches = []
+        scored = []
         for row in getattr(scrip_master, "all_rows", []):
             d_symbol = row.get('Symbol', '').strip().upper()
             d_sec_desc = row.get('SecDesc', '').strip().upper()
             d_token = row.get('Token', '').strip()
-            
-            # Allow searching by exact token number, or substring of symbol/description
-            if query in d_symbol or query in d_sec_desc or query == d_token or query in d_token:
-                matches.append(row)
-                if len(matches) >= 30: # Limit to top 30 results for speed
-                    break
+            if not (query in d_symbol or query in d_sec_desc or query == d_token or query in d_token):
+                continue
+            if segment and row.get('Segment', '').strip() != segment:
+                continue
+            instrument = row.get('Instrument', '').strip().upper()
+            is_option = instrument in OPTION_INSTRUMENTS
+            # "GOLD" matches ~12,000 option rows; hide them unless the query
+            # names a strike, an expiry or CE/PE.
+            if is_option and not wants_options:
+                continue
+            expiry = parse_expiry(row.get('Expiry'))
+            if expiry and expiry < today:
+                continue
+            # Exact symbol first, then tradable futures/cash, then spot reference
+            # rates (MCXSPOT/NCDEXSPOT), then options; nearest expiry first
+            is_spot = row.get('Exchange', '').strip().upper().endswith('SPOT')
+            scored.append((
+                0 if d_symbol == query or d_token == query else 1,
+                2 if is_option else (1 if is_spot else 0),
+                expiry or datetime.date.min,
+                d_symbol,
+                row
+            ))
+        scored.sort(key=lambda item: item[:4])
 
-        for m in matches:
+        for *_, row in scored[:30]:
             try:
-                results.append({
-                    "symbol": m.get("Symbol"),
-                    "name": m.get("SecDesc"),
-                    "segment_id": int(m.get("Segment") or 1),
-                    "token": int(m.get("Token")),
-                    "exchange": m.get("Exchange"),
-                    "type": m.get("Series", "EQUITY"),
-                    "lot": int(m.get("MarketLot") or 1)
-                })
+                results.append(scrip_row_to_result(row))
             except Exception:
                 continue
 
@@ -826,6 +954,26 @@ def search_scrip():
         "count": len(results),
         "results": results[:30]
     })
+
+@app.route("/api/scrip/resolve", methods=["GET"])
+def resolve_scrip():
+    """
+    Resolve a commodity name (GOLD, SILVER, ...) to its nearest live MCX
+    futures contract, with the lot multiplier the simulator needs.
+    """
+    symbol = request.args.get("symbol", "").strip().upper()
+    if not symbol:
+        return jsonify({"status": "error", "message": "symbol is required"}), 400
+    if not getattr(scrip_master, "is_loaded", False):
+        return jsonify({
+            "status": "error",
+            "loading": True,
+            "message": "Choice contract list is still downloading (about 22 MB). Try again in a minute."
+        }), 503
+    row = nearest_future(symbol)
+    if not row:
+        return jsonify({"status": "error", "message": f"No live MCX futures contract found for {symbol}."}), 404
+    return jsonify({"status": "success", "result": scrip_row_to_result(row)})
 
 def parse_date_to_1980_seconds(date_val: str, is_end: bool = False) -> int:
     """Calculates seconds since 1980-01-01 00:00:00 as required by Choice Historical API"""

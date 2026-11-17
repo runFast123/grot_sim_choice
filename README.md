@@ -82,6 +82,37 @@ Resolution order, highest priority first:
 `secrets.json` and `.choice_session.json` are both gitignored. The static file route
 serves front-end assets only and returns 404 for `.py`, `.json`, dotfiles, and logs.
 
+Further protections:
+
+- **No secrets in responses** — login endpoints return only `status`, `message`, `vendor_id`,
+  `base_url` and `logged_in`. The API key, session id, access token, OTP and mobile number
+  stay on the server.
+- **CORS is closed** — the front end is same-origin. To allow another origin explicitly,
+  set `CORS_ORIGINS="https://a.example,https://b.example"`.
+- **Cross-site writes are refused** — POSTs whose `Origin` is another site get HTTP 403.
+- **Gateway allowlist** — credentials are only ever sent to `finxomne.choiceindia.com`
+  or `finx.choiceindia.com`; any other `base_url` falls back to the default.
+- **`/admin/bootstrap` is local-only** — it answers only requests from `127.0.0.1` / `::1`
+  and never displays the stored API key (leave the field blank to keep it). Set
+  `ALLOW_REMOTE_ADMIN=1` to lift this, e.g. when the server sits behind a reverse proxy.
+
+---
+
+## Gold & silver (MCX)
+
+The **GOLD**, **SILVER**, **GOLDM** and **SILVERM** preset chips call `/api/scrip/resolve`,
+which picks the nearest non-expired MCX futures contract from Choice's daily scrip master
+(each expiry has its own token, so fixed tokens go stale). Selecting one also:
+
+- sets *Qty per lot* to the real P&L multiplier: GOLD ×100 (quoted per 10 g, 1 kg lot),
+  SILVER ×30 (per kg, 30 kg lot), GOLDM ×10, SILVERM ×5;
+- switches the session window to MCX hours (09:00–23:25) and the cost model to
+  **MCX Commodity Futures** (CTT 0.01% sell, txn 0.0021%, stamp 0.002%, GST 18%).
+
+The scrip master is ~22 MB and downloads in the background at start-up; until it finishes
+the chips report that the contract list is still loading. Older expiries drop out of the
+master once they expire, so very old date ranges may need a CSV upload instead.
+
 ---
 
 ## Vercel deployment

@@ -351,6 +351,8 @@ def calculate_trade_cost(side, entry, exit_price, qty, config):
         stt = turnover_sell * 0.001
     elif model == 'cash_intra':
         stt = turnover_sell * 0.00025
+    elif model == 'mcx_futures':
+        stt = turnover_sell * 0.0001
 
     txn = 0.0
     if model == 'fo_futures':
@@ -359,12 +361,14 @@ def calculate_trade_cost(side, entry, exit_price, qty, config):
         txn = total_turnover * 0.00035
     elif model == 'cash_intra':
         txn = total_turnover * 0.0000297
+    elif model == 'mcx_futures':
+        txn = total_turnover * 0.000021
 
     sebi = total_turnover * 0.000001
     gst = (brokerage + txn + sebi) * 0.18
 
     stamp = 0.0
-    if model == 'fo_futures':
+    if model in ('fo_futures', 'mcx_futures'):
         stamp = turnover_buy * 0.00002
     elif model in ('fo_options', 'cash_intra'):
         stamp = turnover_buy * 0.00003
@@ -398,6 +402,19 @@ def audit_tax_and_cost_models():
     assert calculate_trade_cost('buy', 100.0, 105.0, 10, {'cost_model': 'flat_custom', 'cost': 15.5}) == 15.5
     print("PASS: Zero and Flat custom cost overrides verified.")
 
+    # MCX Gold: 1 lot = 100x the per-10g quote. Buy 130000 -> sell 130050.
+    # buy 13,000,000, sell 13,005,000, total 26,005,000
+    # brok 40, CTT 1300.50, txn 546.105, sebi 26.005, gst 18% of 612.11 = 110.1798, stamp 260.00 -> 2282.79
+    cost_mcx = calculate_trade_cost('buy', 130000.0, 130050.0, 100, {'cost_model': 'mcx_futures', 'brokerage_rate': 20.0})
+    assert abs(cost_mcx - 2282.79) < 0.02, f"MCX futures cost mismatch: got {cost_mcx}, expected 2282.79"
+    with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
+        html = f.read()
+    for needle in ("model === 'mcx_futures') stt = turnoverSell * 0.0001",
+                   "model === 'mcx_futures') txn = totalTurnover * 0.000021",
+                   "model === 'fo_futures' || model === 'mcx_futures') stamp = turnoverBuy * 0.00002"):
+        assert needle in html, f"index.html MCX cost model drifted from this audit: {needle}"
+    print(f"PASS: MCX commodity futures cost verified (Cost: ₹{cost_mcx:.2f} on ₹26M turnover).")
+
 def audit_multi_target_simultaneous_fill():
     print("\n==================================================")
     print("6. AUDITING MULTI-TARGET EXTREME CHASE RESOLUTION")
@@ -420,6 +437,176 @@ def audit_multi_target_simultaneous_fill():
     assert res['positions'][0]['entry'] == 100.0, f"Chase entry should be 100, got {res['positions'][0]['entry']}"
     print(f"PASS: Simultaneous multi-target resolution properly anchored next chase to 100.0.")
 
+def audit_credential_exposure():
+    """
+    Secrets must never leave the server: not through permissive CORS, not in
+    login responses, not by redirecting them to a caller-chosen gateway, and
+    not through the bootstrap page.
+    """
+    print("\n==================================================")
+    print("7. AUDITING CREDENTIAL EXPOSURE & CROSS-SITE ACCESS")
+    print("==================================================")
+    import json
+    import tempfile
+    import server
+
+    client = app.test_client()
+    evil = "https://evil.example"
+
+    # CORS is closed: another origin gets no Access-Control-Allow-Origin
+    r = client.get('/api/auth/status', headers={"Origin": evil})
+    assert "Access-Control-Allow-Origin" not in r.headers, "CORS must not be open to arbitrary origins"
+
+    # Cross-site writes (CSRF) are refused; same-origin writes still work
+    for path in ('/api/auth/login_auto', '/api/auth/manual', '/api/historical', '/admin/bootstrap'):
+        r = client.post(path, json={}, headers={"Origin": evil})
+        assert r.status_code == 403, f"{path} accepted a cross-origin POST (HTTP {r.status_code})"
+    r = client.post('/admin/bootstrap', data={"vendor_id": "x"}, headers={"Sec-Fetch-Site": "cross-site"})
+    assert r.status_code == 403, "cross-site form POST to /admin/bootstrap must be refused"
+    r = client.post('/api/auth/status', json={}, headers={"Origin": "http://localhost"})
+    assert r.status_code == 200, "same-origin POST must still be allowed"
+    print("PASS: CORS closed and cross-site writes refused.")
+
+    # Credentials can only travel to Choice's own gateways
+    creds = server.extract_credentials({"base_url": evil + "/api"}, None)
+    assert creds["base_url"] in server.ALLOWED_BASE_URLS, f"base_url escaped the allowlist: {creds['base_url']}"
+    assert server.normalize_base_url(server.BASE_URL_FINX) == server.BASE_URL_FINX.rstrip("/")
+    print("PASS: caller-supplied base_url cannot redirect credentials.")
+
+    # Login responses carry no secrets. Choice is stubbed so nothing leaves the machine.
+    class FakeResp:
+        status_code = 200
+        text = ""
+        def __init__(self, payload):
+            self._payload = payload
+        def json(self):
+            return self._payload
+
+    sent_to = []
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent_to.append(url)
+        if url.endswith("GetClientLoginTOTP"):
+            return FakeResp({"Response": "123456"})
+        if url.endswith("ValidateTOTP"):
+            return FakeResp({"Status": "Success", "Response": {"SessionId": "SESS_SECRET", "AccessToken": "TOK_SECRET"}})
+        return FakeResp({"Status": "Success"})
+
+    tmp = tempfile.mkdtemp()
+    saved = (server.requests.post, server.HAS_CHOICE_PKG, server.SESSION_FILE, server.SECRETS_FILE,
+             dict(server.auth_state), server.choice_client)
+    try:
+        server.requests.post = fake_post
+        server.HAS_CHOICE_PKG = False
+        server.SESSION_FILE = os.path.join(tmp, "session.json")
+        server.SECRETS_FILE = os.path.join(tmp, "secrets.json")
+        body = {"vendor_id": "V1", "api_key": "KEY_SECRET", "mobile_no": "9999999999", "base_url": evil}
+        secrets = ("KEY_SECRET", "SESS_SECRET", "TOK_SECRET", "123456", "9999999999")
+        for path, extra in (('/api/auth/get_client_otp', {}), ('/api/auth/validate', {"otp": "123456"}),
+                            ('/api/auth/login_auto', {}), ('/api/auth/manual', {"session_id": "SESS_SECRET"})):
+            r = client.post(path, json=dict(body, **extra))
+            assert r.status_code == 200, f"{path} failed: {r.get_data(as_text=True)}"
+            text = r.get_data(as_text=True)
+            leaked = [s for s in secrets if s in text]
+            assert not leaked, f"{path} response leaks {leaked}"
+        assert sent_to and all(not u.startswith(evil) for u in sent_to), f"credentials sent to {sent_to}"
+        assert server.auth_state["session_id"] == "SESS_SECRET", "server must still keep the session itself"
+        print("PASS: login responses return no key, session, token, OTP or mobile number.")
+
+        # Bootstrap: loopback only, and the stored key is never echoed into the page
+        r = client.get('/admin/bootstrap', environ_base={"REMOTE_ADDR": "192.168.1.50"})
+        assert r.status_code == 403, "/admin/bootstrap must refuse non-local clients"
+        r = client.get('/admin/bootstrap')
+        assert r.status_code == 200 and "KEY_SECRET" not in r.get_data(as_text=True), "bootstrap page echoes the API key"
+        r = client.post('/admin/bootstrap', data={"vendor_id": "V2", "api_key": "", "mobile_no": "8888888888"})
+        assert r.status_code == 200 and server.auth_state["api_key"] == "KEY_SECRET", "blank key field must keep the stored key"
+        with open(server.SECRETS_FILE, encoding="utf-8") as f:
+            assert json.load(f)["base_url"] in server.ALLOWED_BASE_URLS
+        print("PASS: /admin/bootstrap is local-only and never displays the stored key.")
+    finally:
+        (server.requests.post, server.HAS_CHOICE_PKG, server.SESSION_FILE, server.SECRETS_FILE) = saved[:4]
+        server.auth_state.clear()
+        server.auth_state.update(saved[4])
+        server.choice_client = saved[5]
+
+def audit_mcx_contract_resolution():
+    print("\n==================================================")
+    print("8. AUDITING MCX GOLD / SILVER CONTRACT RESOLUTION")
+    print("==================================================")
+    import server
+
+    def row(symbol, token, expiry, lot, price_unit, qty_unit, instrument="FUTCOM", segment="5"):
+        return {"Exchange": "MCXSPOT" if segment == "6" else "MCX", "Segment": segment, "Token": str(token), "Symbol": symbol,
+                "SecName": f"{symbol}|{expiry}", "SecDesc": f"{symbol}FUT", "Instrument": instrument,
+                "Expiry": expiry, "MarketLot": str(lot), "PriceUnit": price_unit, "QtyUnit": qty_unit}
+
+    # Field shapes copied from Choice's scrip master (17 Nov 2026)
+    rows = [
+        row("GOLD", 495213, "04DEC26", 1, "10  GRMS ", "KGS  "),
+        row("GOLD", 559933, "05FEB27", 1, "10  GRMS ", "KGS  "),
+        row("GOLD", 111111, "05NOV26", 1, "10  GRMS ", "KGS  "),          # already expired
+        row("GOLD", 580051, "27NOV26", 1, "10  GRMS ", "KGS  ", "OPTFUT"),  # option, not a future
+        row("SILVER", 495214, "04DEC26", 30, "1  KGS  ", "KGS  "),
+        row("GOLDM", 575011, "04DEC26", 100, "10  GRMS ", "GRMS "),
+        row("SILVERM", 483080, "30NOV26", 5, "1  KGS  ", "KGS  "),
+        row("GOLD", 114, "", 1, "10  GRMS ", "KGS  ", "COM", "6"),          # spot, other segment
+    ]
+    today = datetime.date(2026, 11, 17)
+    gold = server.nearest_future("GOLD", today=today, rows=rows)
+    assert gold and gold["Token"] == "495213", f"GOLD should resolve to the Dec-26 future, got {gold and gold['Token']}"
+    assert server.nearest_future("SILVER", today=today, rows=rows)["Token"] == "495214"
+    assert server.nearest_future("COPPER", today=today, rows=rows) is None
+
+    expected = {"GOLD": 100, "SILVER": 30, "GOLDM": 10, "SILVERM": 5}
+    for r in rows[:7]:
+        if r["Instrument"] == "FUTCOM" and r["Symbol"] in expected:
+            got = server.contract_multiplier(r)
+            assert got == expected[r["Symbol"]], f"{r['Symbol']} multiplier {got}, expected {expected[r['Symbol']]}"
+    res = server.scrip_row_to_result(gold)
+    assert res == {"symbol": "GOLD", "name": "GOLD|04DEC26", "segment_id": 5, "token": 495213,
+                   "exchange": "MCX", "type": "FUTCOM", "expiry": "2026-12-04", "lot": 100}, res
+
+    # Resolve endpoint and ranked search against the stubbed master
+    class FakeMaster:
+        is_loaded = True
+        all_rows = rows
+    client = app.test_client()
+    saved = server.scrip_master
+    try:
+        server.scrip_master = None
+        r = client.get('/api/scrip/resolve?symbol=GOLD')
+        assert r.status_code == 503 and r.get_json().get("loading"), "must report the master is still loading"
+        server.scrip_master = FakeMaster()
+        r = client.get('/api/scrip/resolve?symbol=SILVER')
+        assert r.status_code == 200, r.get_data(as_text=True)
+        data = r.get_json()["result"]
+        assert data["segment_id"] == 5 and data["lot"] == 30
+        r = client.get('/api/scrip/search?query=GOLD')
+        tokens = [x["token"] for x in r.get_json()["results"]]
+        assert 580051 not in tokens and 111111 not in tokens, "search must hide options and expired contracts"
+        assert tokens[:2] == [495213, 559933], f"GOLD futures (nearest expiry first) must rank above spot: {tokens}"
+    finally:
+        server.scrip_master = saved
+
+    with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
+        html = f.read()
+    for name in ("GOLD", "SILVER"):
+        assert f"selectCommodity('{name}')" in html, f"{name} preset chip missing"
+    assert not any(t in open(os.path.join(ROOT, "server.py"), encoding="utf-8").read() for t in ('"token": 100001', '"token": 100002')), \
+        "placeholder MCX tokens must be gone"
+    print("PASS: GOLD/SILVER resolve to the nearest live future with correct per-lot multipliers.")
+
+def audit_start_price_anchor():
+    print("\n==================================================")
+    print("9. AUDITING CUSTOM START PRICE ANCHOR")
+    print("==================================================")
+    with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
+        html = f.read()
+    # prepare() and the per-day reset in step() must share one guarded rule
+    assert "c.source === 'market' || !(c.startPrice > 0)" in html, "anchorFor guard missing"
+    assert html.count("anchorFor(") >= 3, "prepare() and step() must both use anchorFor()"
+    assert "anchorPrice=c.source==='market'?b.c:c.startPrice" not in html, "unguarded anchor is back in step()"
+    print("PASS: a 0 start price falls back to the market price in both prepare() and step().")
+
 if __name__ == "__main__":
     audit_html_dom()
     audit_simulation_algorithms()
@@ -427,6 +614,9 @@ if __name__ == "__main__":
     audit_credential_persistence()
     audit_tax_and_cost_models()
     audit_multi_target_simultaneous_fill()
+    audit_credential_exposure()
+    audit_mcx_contract_resolution()
+    audit_start_price_anchor()
     print("\n==================================================")
     print("🎉 DEEP SYSTEM AUDIT COMPLETE — ALL CHECKS PASSED!")
     print("==================================================")

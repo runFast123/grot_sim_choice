@@ -284,6 +284,10 @@
           <button type="button" class="chip" onclick="selectSymbol('FINNIFTY', 1, 26037, 25)">FINNIFTY</button>
           <button type="button" class="chip" onclick="selectSymbol('SENSEX', 3, 1, 10)">SENSEX</button>
           <button type="button" class="chip" onclick="selectSymbol('RELIANCE', 1, 2885, 1)">RELIANCE</button>
+          <button type="button" class="chip" onclick="selectCommodity('GOLD')" title="MCX Gold futures, nearest expiry (1 kg lot)">GOLD</button>
+          <button type="button" class="chip" onclick="selectCommodity('SILVER')" title="MCX Silver futures, nearest expiry (30 kg lot)">SILVER</button>
+          <button type="button" class="chip" onclick="selectCommodity('GOLDM')" title="MCX Gold Mini futures, nearest expiry (100 g lot)">GOLDM</button>
+          <button type="button" class="chip" onclick="selectCommodity('SILVERM')" title="MCX Silver Mini futures, nearest expiry (5 kg lot)">SILVERM</button>
         </div>
 
         <div class="row">
@@ -301,7 +305,7 @@
             <input id="apiToken" type="number" value="26000" title="Choice instrument token">
           </div>
         </div>
-        <div class="note">Use a preset unless you already know the Choice token. NIFTY is 26000, BANKNIFTY is 26009.</div>
+        <div class="note" id="symbolNote">Use a preset unless you already know the Choice token. NIFTY is 26000, BANKNIFTY is 26009. GOLD / SILVER pick the nearest MCX futures expiry.</div>
         <div class="row">
           <div>
             <label for="apiResolution">Timeframe</label>
@@ -372,6 +376,7 @@
         <option value="fo_futures" selected>Indian F&amp;O Futures (NSE 2024)</option>
         <option value="fo_options">Indian F&amp;O Options (NSE 2024)</option>
         <option value="cash_intra">Indian Cash Intraday (NSE)</option>
+        <option value="mcx_futures">MCX Commodity Futures (Gold / Silver)</option>
         <option value="flat_custom">Custom Flat ₹ per Trade</option>
         <option value="zero">Zero Brokerage &amp; Taxes</option>
       </select>
@@ -793,20 +798,59 @@
     }, 200);
   });
 
+  // NSE trades 09:15-15:30; MCX metals run 09:00-23:30. Switch the replay
+  // window and cost model with the market, but only while they still hold the
+  // other market's defaults, so a user-chosen window is never overwritten.
+  const MARKET_DEFAULTS = {
+    nse: { start: '09:30', end: '15:15', cost: 'fo_futures' },
+    mcx: { start: '09:00', end: '23:25', cost: 'mcx_futures' }
+  };
+  function applyMarketDefaults(seg) {
+    const to = +seg === 5 ? MARKET_DEFAULTS.mcx : MARKET_DEFAULTS.nse;
+    const from = to === MARKET_DEFAULTS.mcx ? MARKET_DEFAULTS.nse : MARKET_DEFAULTS.mcx;
+    if ($('startTime').value === from.start) $('startTime').value = to.start;
+    if ($('endTime').value === from.end) $('endTime').value = to.end;
+    if ($('costModel') && $('costModel').value === from.cost) {
+      $('costModel').value = to.cost;
+      updateCostUI();
+    }
+  }
+
   window.selectSymbol = (sym, seg, tok, lot) => {
     symbolInput.value = sym;
     $('apiSegment').value = seg;
     $('apiToken').value = tok;
-    if(lot && lot > 1) {
+    // An MCX multiplier of 1 (GOLDTEN, SILVERMIC) is real and must replace
+    // whatever a previous pick left behind.
+    if(lot && (lot > 1 || +seg === 5)) {
       $('perTradeQty').value = lot;
       updateQtyHint();
     }
+    applyMarketDefaults(seg);
     document.querySelectorAll('#presetChips .chip').forEach(chip => {
       const label = chip.textContent.trim();
       chip.classList.toggle('active', label === String(sym).split(' ')[0] || label === String(sym));
     });
     symbolList.style.display = 'none';
     updateFlow();
+  };
+
+  // MCX futures change token every expiry, so the server resolves the nearest
+  // live contract from Choice's daily scrip master instead of a fixed token.
+  window.selectCommodity = async (name) => {
+    const note = $('symbolNote');
+    if (note) note.textContent = `Finding the nearest ${name} futures contract…`;
+    try {
+      const res = await fetch(`/api/scrip/resolve?symbol=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      if (data.status !== 'success') throw new Error(data.message || 'Contract lookup failed');
+      const r = data.result;
+      window.selectSymbol(r.symbol, r.segment_id, r.token, r.lot);
+      symbolInput.value = `${r.symbol} FUT ${r.expiry}`;
+      if (note) note.textContent = `${r.symbol} futures · expiry ${r.expiry} · token ${r.token} · ₹${r.lot} P&L per ₹1 move per lot. Prices are per ${r.symbol.startsWith('SILVER') ? 'kg' : '10 g'}.`;
+    } catch (e) {
+      if (note) note.textContent = `${name}: ${e.message}`;
+    }
   };
 
   document.addEventListener('click', e => {
@@ -1021,6 +1065,7 @@
     if (m === 'fo_futures') hint.textContent = 'Indian F&O Futures: ₹20/ord + STT 0.02% (sell) + Txn 0.00173% + GST 18% + Stamp 0.002%';
     else if (m === 'fo_options') hint.textContent = 'Indian F&O Options: ₹20/ord + STT 0.1% (sell premium) + Txn 0.035% + GST 18% + Stamp 0.003%';
     else if (m === 'cash_intra') hint.textContent = 'NSE Cash Intraday: ₹20/ord max + STT 0.025% (sell) + Txn 0.00297% + GST 18% + Stamp 0.003%';
+    else if (m === 'mcx_futures') hint.textContent = 'MCX Futures (non-agri): ₹20/ord + CTT 0.01% (sell) + Txn 0.0021% + GST 18% + Stamp 0.002%';
     else if (m === 'flat_custom') hint.textContent = 'Custom fixed ₹ amount deducted per round-trip completed trade.';
     else if (m === 'zero') hint.textContent = 'Zero brokerage and zero statutory taxes (Gross = Net).';
   }
@@ -1049,17 +1094,19 @@
     if (model === 'fo_futures') stt = turnoverSell * 0.0002;
     else if (model === 'fo_options') stt = turnoverSell * 0.001;
     else if (model === 'cash_intra') stt = turnoverSell * 0.00025;
+    else if (model === 'mcx_futures') stt = turnoverSell * 0.0001; // CTT on non-agri commodity futures
 
     let txn = 0;
     if (model === 'fo_futures') txn = totalTurnover * 0.0000173;
     else if (model === 'fo_options') txn = totalTurnover * 0.00035;
     else if (model === 'cash_intra') txn = totalTurnover * 0.0000297;
+    else if (model === 'mcx_futures') txn = totalTurnover * 0.000021;
 
     const sebi = totalTurnover * 0.000001;
     const gst = (brokerage + txn + sebi) * 0.18;
 
     let stamp = 0;
-    if (model === 'fo_futures') stamp = turnoverBuy * 0.00002;
+    if (model === 'fo_futures' || model === 'mcx_futures') stamp = turnoverBuy * 0.00002;
     else if (model === 'fo_options' || model === 'cash_intra') stamp = turnoverBuy * 0.00003;
 
     const total = brokerage + stt + txn + sebi + gst + stamp;
@@ -1198,6 +1245,13 @@
     if($(id)) $(id).addEventListener('change', () => { if(allBars.length) { calcIndicators(); needsRender = true; } });
   });
 
+  // One rule for both prepare() and each new day in step(): a custom start
+  // price of 0 (the default) means "not set", so fall back to the market close.
+  // Previously step() skipped this guard and anchored the ladder at 0.
+  function anchorFor(bar, c){
+    return (c.source === 'market' || !(c.startPrice > 0)) ? bar.c : c.startPrice;
+  }
+
   function prepare(){
     stop();
     if (!allBars.length) {
@@ -1248,7 +1302,7 @@
     worstOne = 0;
     peakCapital = 0;
     
-    anchorPrice = (c.source === 'market' || c.startPrice <= 0) ? sessionBars[0].c : c.startPrice;
+    anchorPrice = anchorFor(sessionBars[0], c);
     benchmarkAnchor = anchorPrice;
     resetLadder();
     prepared = true;
@@ -1348,7 +1402,7 @@
     if(!prepared||idx>=sessionBars.length){stop();return;}
     const c=config(),b=sessionBars[idx],newDay=idx===0||dateKey(sessionBars[idx-1].dt)!==dateKey(b.dt);
     if(idx===0||newDay){
-      anchorPrice=c.source==='market'?b.c:c.startPrice;
+      anchorPrice=anchorFor(b,c);
       resetLadder();
       if(idx>0){
         strategyStopped=false;
