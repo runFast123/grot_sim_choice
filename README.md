@@ -21,6 +21,8 @@ An algorithmic backtesting and replay simulator for the **GROT (Grid Order Track
 index.html          Single-file front end (markup, styles, simulation engine, canvas charts)
 server.py           Flask backend: Choice auth, scrip search, historical proxy, secrets bootstrap
 api/index.py        Vercel serverless entry point (re-exports the Flask app)
+desktop_app.py      Windows desktop launcher (credentials window + local server)
+build_exe.bat       Builds dist\GROT Simulator.exe with PyInstaller
 tests/
   deep_audit.py     DOM/route/security audit + strategy math checks
   test_simulator.py Ladder engine and API endpoint tests
@@ -98,6 +100,35 @@ which picks the nearest non-expired MCX futures contract from Choice's daily scr
 The scrip master is ~22 MB and downloads in the background at start-up; until it finishes
 the chips report that the contract list is still loading. Older expiries drop out of the
 master once they expire, so very old date ranges may need a CSV upload instead.
+
+---
+
+## Desktop app (Windows .exe)
+
+The same simulator also ships as a single Windows program, `GROT Simulator.exe`, for
+people who want it running on their own PC instead of the web app. It runs the
+unchanged `server.py` and `index.html` locally, so every calculation is identical.
+
+- **Credentials stay on the PC.** A small window asks for the Client ID (Vendor ID), API
+  Key, registered mobile number and gateway, and saves them to
+  `%APPDATA%\GROT Simulator\secrets.json`. The daily session and a log file live in the same folder.
+- **Requests come from your own IP.** Choice calls go out over the PC's own internet
+  connection, so they match the Static IP set on the Choice API key. **Check my IP** shows
+  that IP.
+- **Local only.** The server listens on `127.0.0.1` (port 5757, or a free port if that one
+  is taken) and is not reachable from other machines.
+- **Using it.** Click **Open Simulator**, then **🔑 Login / Settings → 1-Click Login**.
+  Closing the window stops the simulator.
+
+Build the exe (a clean virtual environment is created in `build\venv`, so only the app's
+own dependencies are bundled):
+
+```bat
+build_exe.bat
+```
+
+The result is `dist\GROT Simulator.exe`. To run the desktop version from source instead:
+`python desktop_app.py`.
 
 ---
 

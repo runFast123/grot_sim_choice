@@ -29,3 +29,8 @@ test_gateways.py
 
 .vercel
 .env*
+
+# Desktop .exe build output
+build/
+dist/
+*.spec
