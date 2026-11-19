@@ -44,9 +44,6 @@ auth_state = {
     "mobile_no": os.environ.get("CHOICE_MOBILE", ""),
     "base_url": os.environ.get("CHOICE_BASE_URL", DEFAULT_BASE_URL),
     "last_otp": "",
-    # Day (YYYY-MM-DD) the session_id above came from a real login. Only a
-    # session from today is reused, so 1-Click Login doesn't send a new OTP.
-    "session_date": "",
     "user_details": {}
 }
 
@@ -56,7 +53,7 @@ DEFAULT_SCRIPS = [
     {"symbol": "BANKNIFTY", "name": "Nifty Bank Index", "segment_id": 1, "token": 26009, "exchange": "NSE-CM", "type": "INDEX", "lot": 1},
     {"symbol": "FINNIFTY", "name": "Nifty Financial Services", "segment_id": 1, "token": 26037, "exchange": "NSE-CM", "type": "INDEX", "lot": 1},
     {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap Select", "segment_id": 1, "token": 26074, "exchange": "NSE-CM", "type": "INDEX", "lot": 1},
-    {"symbol": "SENSEX", "name": "BSE Sensex Index", "segment_id": 3, "token": 19000, "exchange": "BSE-CM", "type": "INDEX", "lot": 1},
+    {"symbol": "SENSEX", "name": "BSE Sensex Index", "segment_id": 3, "token": 1, "exchange": "BSE-CM", "type": "INDEX", "lot": 1},
     {"symbol": "RELIANCE", "name": "Reliance Industries Ltd", "segment_id": 1, "token": 2885, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
     {"symbol": "TCS", "name": "Tata Consultancy Services", "segment_id": 1, "token": 11536, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
     {"symbol": "HDFCBANK", "name": "HDFC Bank Ltd", "segment_id": 1, "token": 1333, "exchange": "NSE-CM", "type": "EQUITY", "lot": 1},
@@ -73,7 +70,6 @@ DEFAULT_SCRIPS = [
 # /api/scrip/resolve picks the nearest live contract from the scrip master.
 
 MCX_SEGMENT = "5"
-FUTURES_SEGMENTS = {"2": "NSE F&O", "4": "BSE F&O", MCX_SEGMENT: "MCX"}
 MCX_FUTURES_SYMBOLS = {"GOLD", "GOLDM", "GOLDTEN", "GOLDPETAL", "GOLDGUINEA",
                        "SILVER", "SILVERM", "SILVERMIC", "SILVER100",
                        "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC"}
@@ -191,18 +187,11 @@ def extract_credentials(req_data=None, req_obj=None):
     if api_key:
         api_key = str(api_key).strip()
 
-    # A session from this request (the browser sends today's login session as
-    # X-Session-Id) wins, then the session this process got from its own
-    # 1-Click Login, and only then CHOICE_SESSION_ID. Choice sessions die every
-    # trading day, so a fixed env value is usually stale; it used to outrank a
-    # fresh login, which made every data fetch fail with 401 even right after
-    # a successful login. auth_state starts out holding the env value, so it
-    # is still used when nothing fresher exists.
     session_id = (
         data.get("session_id")
         or headers.get("X-Session-Id")
-        or auth_state.get("session_id", "")
         or os.environ.get("CHOICE_SESSION_ID", "")
+        or auth_state.get("session_id", "")
     )
     if not session_id and headers.get("Authorization"):
         auth_hdr = headers.get("Authorization", "").strip()
@@ -381,7 +370,6 @@ def load_session_from_file():
         auth_state["session_id"] = str(data.get("session_id", "") or "")
         auth_state["access_token"] = str(data.get("access_token", "") or "")
         auth_state["logged_in"] = bool(auth_state["session_id"])
-        auth_state["session_date"] = data.get("date", "")
 
     init_choice_client()
     return session_is_today
@@ -738,10 +726,6 @@ def auth_validate():
             "message": f"ValidateTOTP connection failed: {str(e)}"
         }), 500
 
-LOGIN_COOLDOWN_SECONDS = 30
-_login_lock = threading.Lock()
-_last_login_attempt = {"at": 0.0}
-
 @app.route("/api/auth/login_auto", methods=["POST"])
 def auth_login_auto():
     """
@@ -749,11 +733,6 @@ def auth_login_auto():
     1. LoginTOTP
     2. GetClientLoginTOTP (retrieve OTP)
     3. ValidateTOTP (exchange OTP for SessionId)
-
-    Every real login makes Choice send an OTP to the registered mobile, so
-    this only logs in when there is no session from today. A session the
-    browser sends (X-Session-Id, saved at its own login today) or one this
-    server got today is reused instead. Send {"force": true} to log in anyway.
     """
     data = request.get_json(silent=True) or {}
     creds = extract_credentials(data, request)
@@ -769,39 +748,6 @@ def auth_login_auto():
             "message": "Server has no Choice credentials yet. Open /admin/bootstrap to store your Client ID, API Key and mobile number (or set CHOICE_VENDOR_ID / CHOICE_API_KEY / CHOICE_MOBILE)."
         }), 400
 
-    today = datetime.date.today().isoformat()
-    force = bool(data.get("force"))
-    browser_session = str(request.headers.get("X-Session-Id", "") or "").strip()
-    server_session = str(auth_state.get("session_id") or "").strip()
-    if not force and (browser_session or (server_session and auth_state.get("session_date") == today)):
-        session_id = browser_session or server_session
-        return jsonify({
-            "status": "success",
-            "reused": True,
-            "message": "Already logged in to Choice today - reused the session, no new OTP sent.",
-            "session_id": session_id,
-            "vendor_id": vendor_id,
-            "base_url": base_url,
-            "logged_in": True
-        })
-
-    # One login at a time, and not again within the cool-down: double clicks
-    # or several people pressing the button would each trigger an OTP.
-    if not _login_lock.acquire(blocking=False):
-        return jsonify({"status": "error", "message": "A Choice login is already in progress. Please wait a few seconds."}), 429
-    try:
-        wait = LOGIN_COOLDOWN_SECONDS - (datetime.datetime.now().timestamp() - _last_login_attempt["at"])
-        if wait > 0 and not force:
-            return jsonify({
-                "status": "error",
-                "message": f"A login was just attempted. Wait {int(wait) + 1} s before trying again (each attempt sends an OTP)."
-            }), 429
-        _last_login_attempt["at"] = datetime.datetime.now().timestamp()
-        return _perform_login(vendor_id, api_key, mobile_no, base_url, today)
-    finally:
-        _login_lock.release()
-
-def _perform_login(vendor_id, api_key, mobile_no, base_url, today):
     auth_state["mobile_no"] = mobile_no
     auth_state["vendor_id"] = vendor_id
     auth_state["api_key"] = api_key
@@ -812,12 +758,11 @@ def _perform_login(vendor_id, api_key, mobile_no, base_url, today):
         try:
             client = ChoiceClient(vendor_id=vendor_id, api_key=api_key, base_url=base_url)
             sess_id = client.login(mobile_no)
-
+            
             auth_state["session_id"] = str(client.session_id)
             auth_state["access_token"] = str(client.access_token or api_key)
             auth_state["logged_in"] = True
-            auth_state["session_date"] = today
-
+            
             global choice_client
             choice_client = client
             save_session_to_file()
@@ -833,13 +778,10 @@ def _perform_login(vendor_id, api_key, mobile_no, base_url, today):
                 "base_url": base_url,
                 "logged_in": True
             })
-        except Exception as e:
-            # Do not fall through to the manual flow: the SDK may already have
-            # called LoginTOTP, so repeating the login would send a second OTP
-            # for the same click.
-            return jsonify({"status": "error", "message": f"Choice login failed: {str(e)[:300]}"}), 502
+        except Exception:
+            pass # Fallback to manual requests below
 
-    # Direct requests, used only when the choice_api package is not installed
+    # Fallback to direct requests
     encoded_mobile = encode_mobile(mobile_no)
     headers = {"VendorId": vendor_id, "Bearer": api_key, "Content-Type": "application/json"}
     
@@ -868,7 +810,6 @@ def _perform_login(vendor_id, api_key, mobile_no, base_url, today):
         auth_state["access_token"] = str(access_token)
         auth_state["logged_in"] = True
         auth_state["last_otp"] = str(otp)
-        auth_state["session_date"] = today
 
         init_choice_client()
         save_session_to_file()
@@ -985,26 +926,21 @@ def search_scrip():
 @app.route("/api/scrip/resolve", methods=["GET"])
 def resolve_scrip():
     """
-    Resolve a name to its nearest live futures contract, with the lot
-    multiplier the simulator needs. Defaults to MCX (GOLD, SILVER, ...);
-    segment=2 (NSE F&O) or 4 (BSE F&O) gives index futures such as NIFTY or
-    SENSEX, whose lot size the index preset chips use.
+    Resolve a commodity name (GOLD, SILVER, ...) to its nearest live MCX
+    futures contract, with the lot multiplier the simulator needs.
     """
     symbol = request.args.get("symbol", "").strip().upper()
-    segment = request.args.get("segment", MCX_SEGMENT).strip() or MCX_SEGMENT
     if not symbol:
         return jsonify({"status": "error", "message": "symbol is required"}), 400
-    if segment not in FUTURES_SEGMENTS:
-        return jsonify({"status": "error", "message": f"segment must be one of {sorted(FUTURES_SEGMENTS)}"}), 400
     if not getattr(scrip_master, "is_loaded", False):
         return jsonify({
             "status": "error",
             "loading": True,
             "message": "Choice contract list is still downloading (about 22 MB). Try again in a minute."
         }), 503
-    row = nearest_future(symbol, segment=segment)
+    row = nearest_future(symbol)
     if not row:
-        return jsonify({"status": "error", "message": f"No live {FUTURES_SEGMENTS[segment]} futures contract found for {symbol}."}), 404
+        return jsonify({"status": "error", "message": f"No live MCX futures contract found for {symbol}."}), 404
     return jsonify({"status": "success", "result": scrip_row_to_result(row)})
 
 def parse_date_to_1980_seconds(date_val: str, is_end: bool = False) -> int:
@@ -1116,7 +1052,7 @@ def get_historical_candles():
                         is_avail = chart_resp.get("IsDataAvailable", False)
                         return jsonify({
                             "status": "error",
-                            "message": f"Choice OpenAPI connected successfully, but returned no candles for Token {token} on Segment {segment_id} (IsDataAvailable={is_avail}).\n\nTips:\n• For NIFTY 50 Index use Token: 26000 (Segment: 1)\n• For BANKNIFTY Index use Token: 26009 (Segment: 1)\n• For SENSEX Index use Token: 19000 (Segment: 3)\n• For stocks, search by name in the Symbol box.\n• Ensure the selected date range contains active market trading days.",
+                            "message": f"Choice OpenAPI connected successfully, but returned no candles for Token {token} on Segment {segment_id} (IsDataAvailable={is_avail}).\n\nTips:\n• For NIFTY 50 Index use Token: 26000 (Segment: 1)\n• For BANKNIFTY Index use Token: 26009 (Segment: 1)\n• For SENSEX Index use Token: 1 (Segment: 3)\n• For stocks, search by name in the Symbol box.\n• Ensure the selected date range contains active market trading days.",
                             "raw": res_json
                         }), 404
         except Exception as e:
@@ -1131,36 +1067,9 @@ def get_historical_candles():
     )
 
     if last_status == 401:
-        if re.search(r"vendor\s*(id|key)", last_resp_text, re.I):
-            # Choice says this for historical data when the API key has expired
-            # (keys are issued for 1 week or 1 month) or no longer matches the
-            # key's declared static IP, even though login still succeeds.
-            # Locally the server only sees 127.0.0.1 / a LAN address, which is
-            # not the public IP Choice checks, so only name a real public IP.
-            is_local_ip = re.match(r"^(127\.|::1$|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)", client_ip or "")
-            ip_text = "this computer's public IP" if (is_local_ip or not client_ip) else client_ip
-            message = (
-                "Choice rejected your API key for historical data "
-                f"(\"{last_resp_text.strip()[:120]}\"). Login can still succeed in this state. "
-                "Most likely the API key has expired (Choice keys last 1 week or 1 month) "
-                f"or its Static IP no longer matches {ip_text}. "
-                "Fix: FinX portal > Profile > API key - check validity and Static IP, generate a new key if needed, "
-                "then save it via /admin/bootstrap (or CHOICE_API_KEY on Vercel) and log in again."
-            )
-            reason = "api_key_rejected"
-        else:
-            message = (f"Choice API 401 Unauthorized: {last_resp_text}. (Client IP: {client_ip}). "
-                       "Your Choice session may have expired - click 1-Click Login and try again. "
-                       "If it keeps failing, check that your Choice Portal API Key has your static IP registered.")
-            reason = "unauthorized"
-            # The session itself was refused, so it must not be reused by
-            # 1-Click Login: the next click does one real login.
-            auth_state["session_id"] = ""
-            auth_state["session_date"] = ""
         return jsonify({
             "status": "error",
-            "reason": reason,
-            "message": message,
+            "message": f"Choice API 401 Unauthorized: {last_resp_text}. (Client IP: {client_ip}). Please check that your Choice Portal API Key has your static IP registered or allows your IP.",
             "client_ip": client_ip,
             "tried_gateways": urls_to_try
         }), 401

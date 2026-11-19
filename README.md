@@ -71,9 +71,7 @@ that the static file route does not expose source, secrets, or session files.
 
 ## Credential handling
 
-Credentials live on the server only. The browser keeps just the day's Choice session id
-(from 1-Click Login, in `localStorage`, dropped at the date change) and sends it as
-`X-Session-Id`, because on Vercel each request may reach a different server instance.
+Credentials live on the server only. Nothing is stored in the browser.
 
 Resolution order, highest priority first:
 

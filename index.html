@@ -279,10 +279,10 @@
         </div>
 
         <div class="chip-row" id="presetChips">
-          <button type="button" class="chip active" onclick="selectIndex('NIFTY 50', 1, 26000, 65, 'NIFTY', 2)">NIFTY</button>
-          <button type="button" class="chip" onclick="selectIndex('BANKNIFTY', 1, 26009, 30, 'BANKNIFTY', 2)">BANKNIFTY</button>
-          <button type="button" class="chip" onclick="selectIndex('FINNIFTY', 1, 26037, 60, 'FINNIFTY', 2)">FINNIFTY</button>
-          <button type="button" class="chip" onclick="selectIndex('SENSEX', 3, 19000, 20, 'SENSEX', 4)">SENSEX</button>
+          <button type="button" class="chip active" onclick="selectSymbol('NIFTY 50', 1, 26000, 50)">NIFTY</button>
+          <button type="button" class="chip" onclick="selectSymbol('BANKNIFTY', 1, 26009, 15)">BANKNIFTY</button>
+          <button type="button" class="chip" onclick="selectSymbol('FINNIFTY', 1, 26037, 25)">FINNIFTY</button>
+          <button type="button" class="chip" onclick="selectSymbol('SENSEX', 3, 1, 10)">SENSEX</button>
           <button type="button" class="chip" onclick="selectSymbol('RELIANCE', 1, 2885, 1)">RELIANCE</button>
           <button type="button" class="chip" onclick="selectCommodity('GOLD')" title="MCX Gold futures, nearest expiry (1 kg lot)">GOLD</button>
           <button type="button" class="chip" onclick="selectCommodity('SILVER')" title="MCX Silver futures, nearest expiry (30 kg lot)">SILVER</button>
@@ -694,31 +694,10 @@
   // The browser no longer stores API Keys or Client IDs.
   // It only relies on the backend `server.py` state or cookies/session matching.
   
-  // Choice issues one session per trading day. On Vercel every request can be
-  // answered by a different server instance that never saw this browser's
-  // 1-Click Login (and cannot save it to disk), so the browser keeps today's
-  // session id and sends it along. API keys and Client IDs stay server-side.
-  const SESSION_KEY = 'grotChoiceSession';
-  function loadDaySession() {
-    try {
-      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
-      if (s && s.id && s.day === dateKey(new Date())) return s.id;
-      localStorage.removeItem(SESSION_KEY); // yesterday's session is dead
-    } catch (e) { /* storage blocked: fall back to the server's own session */ }
-    return '';
-  }
-  function saveDaySession(id) {
-    try { if (id) localStorage.setItem(SESSION_KEY, JSON.stringify({ id: String(id), day: dateKey(new Date()) })); } catch (e) {}
-  }
-  function clearDaySession() {
-    try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
-  }
-
   function getAuthHeaders() {
-    const headers = { 'Content-Type': 'application/json' };
-    const sid = loadDaySession();
-    if (sid) headers['X-Session-Id'] = sid;
-    return headers;
+    return {
+      'Content-Type': 'application/json'
+    };
   }
 
   function setModalAuthMsg(text, tone) {
@@ -730,7 +709,7 @@
 
   async function checkAuthStatus() {
     try {
-      const res = await fetch('/api/auth/status', { headers: getAuthHeaders() });
+      const res = await fetch('/api/auth/status');
       const data = await res.json();
 
       if(data.logged_in && data.has_session) {
@@ -770,8 +749,6 @@
       });
       const data = await res.json();
       if(data.status === 'success') {
-        saveDaySession(data.session_id);
-        // data.reused: today's session was reused and Choice sent no new OTP
         setModalAuthMsg(data.message || 'Login successful.', 'ok');
         closeAuthModal();
         checkAuthStatus();
@@ -856,24 +833,6 @@
     });
     symbolList.style.display = 'none';
     updateFlow();
-  };
-
-  // Index chips load the index itself (spot token) but size trades by the
-  // index futures lot. Exchanges revise lots every few months, so after
-  // applying the built-in value (current as of Nov 2026) we refresh it from
-  // the nearest futures contract in Choice's daily scrip master.
-  window.selectIndex = async (sym, seg, tok, lot, futSymbol, futSegment) => {
-    window.selectSymbol(sym, seg, tok, lot);
-    try {
-      const res = await fetch(`/api/scrip/resolve?symbol=${encodeURIComponent(futSymbol)}&segment=${futSegment}`);
-      const data = await res.json();
-      const live = data.status === 'success' ? +data.result.lot : 0;
-      // Only apply if the user has not picked another symbol meanwhile
-      if (live > 1 && $('apiToken').value === String(tok)) {
-        $('perTradeQty').value = live;
-        updateQtyHint();
-      }
-    } catch (e) { /* keep the built-in lot */ }
   };
 
   // MCX futures change token every expiry, so the server resolves the nearest
@@ -988,17 +947,12 @@
     try {
       const res = await fetch('/api/historical', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if(res.status === 401 && data.reason !== 'api_key_rejected') {
-        // The session was refused: drop it so the next 1-Click Login does one
-        // real login. A rejected API key keeps it, because logging in again
-        // cannot fix the key and would only send another OTP.
-        clearDaySession();
-        checkAuthStatus();
-      }
 
       if(data.status === 'success' && data.bars && data.bars.length) {
         loadedBars = data.bars.map(b => ({
@@ -1291,13 +1245,6 @@
     if($(id)) $(id).addEventListener('change', () => { if(allBars.length) { calcIndicators(); needsRender = true; } });
   });
 
-  // One rule for both prepare() and each new day in step(): a custom start
-  // price of 0 (the default) means "not set", so fall back to the market close.
-  // Previously step() skipped this guard and anchored the ladder at 0.
-  function anchorFor(bar, c){
-    return (c.source === 'market' || !(c.startPrice > 0)) ? bar.c : c.startPrice;
-  }
-
   function prepare(){
     stop();
     if (!allBars.length) {
@@ -1348,7 +1295,7 @@
     worstOne = 0;
     peakCapital = 0;
     
-    anchorPrice = anchorFor(sessionBars[0], c);
+    anchorPrice = (c.source === 'market' || c.startPrice <= 0) ? sessionBars[0].c : c.startPrice;
     benchmarkAnchor = anchorPrice;
     resetLadder();
     prepared = true;
@@ -1448,7 +1395,7 @@
     if(!prepared||idx>=sessionBars.length){stop();return;}
     const c=config(),b=sessionBars[idx],newDay=idx===0||dateKey(sessionBars[idx-1].dt)!==dateKey(b.dt);
     if(idx===0||newDay){
-      anchorPrice=anchorFor(b,c);
+      anchorPrice=c.source==='market'?b.c:c.startPrice;
       resetLadder();
       if(idx>0){
         strategyStopped=false;

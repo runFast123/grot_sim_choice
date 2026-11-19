@@ -458,11 +458,6 @@ def audit_mcx_contract_resolution():
         row("GOLDM", 575011, "04DEC26", 100, "10  GRMS ", "GRMS "),
         row("SILVERM", 483080, "30NOV26", 5, "1  KGS  ", "KGS  "),
         row("GOLD", 114, "", 1, "10  GRMS ", "KGS  ", "COM", "6"),          # spot, other segment
-        # Index futures (lot sizes from the same master): SENSEX's lot rises
-        # to 25 from the Jan-27 contract, so the nearest expiry must win
-        row("NIFTY", 61471, "23NOV26", 65, "", "", "FUTIDX", "2"),
-        row("SENSEX", 70001, "26NOV26", 20, "13  2", "", "FUTIDX", "4"),
-        row("SENSEX", 70002, "28JAN27", 25, "13  2", "", "FUTIDX", "4"),
     ]
     today = datetime.date(2026, 11, 17)
     gold = server.nearest_future("GOLD", today=today, rows=rows)
@@ -494,11 +489,6 @@ def audit_mcx_contract_resolution():
         assert r.status_code == 200, r.get_data(as_text=True)
         data = r.get_json()["result"]
         assert data["segment_id"] == 5 and data["lot"] == 30
-        r = client.get('/api/scrip/resolve?symbol=NIFTY&segment=2')
-        assert r.status_code == 200 and r.get_json()["result"]["lot"] == 65, r.get_data(as_text=True)
-        r = client.get('/api/scrip/resolve?symbol=SENSEX&segment=4')
-        assert r.status_code == 200 and r.get_json()["result"]["lot"] == 20, "SENSEX must use the nearest expiry's lot"
-        assert client.get('/api/scrip/resolve?symbol=NIFTY&segment=9').status_code == 400, "unknown segment must be rejected"
         r = client.get('/api/scrip/search?query=GOLD')
         tokens = [x["token"] for x in r.get_json()["results"]]
         assert 580051 not in tokens and 111111 not in tokens, "search must hide options and expired contracts"
@@ -510,180 +500,9 @@ def audit_mcx_contract_resolution():
         html = f.read()
     for name in ("GOLD", "SILVER"):
         assert f"selectCommodity('{name}')" in html, f"{name} preset chip missing"
-    # Index chips carry the current lot as a fallback (Nov 2026) and refresh it live
-    for chip in ("selectIndex('NIFTY 50', 1, 26000, 65, 'NIFTY', 2)",
-                 "selectIndex('BANKNIFTY', 1, 26009, 30, 'BANKNIFTY', 2)",
-                 "selectIndex('FINNIFTY', 1, 26037, 60, 'FINNIFTY', 2)",
-                 "selectIndex('SENSEX', 3, 19000, 20, 'SENSEX', 4)"):  # token 1 returned no candles
-        assert chip in html, f"index chip missing or outdated: {chip}"
     assert not any(t in open(os.path.join(ROOT, "server.py"), encoding="utf-8").read() for t in ('"token": 100001', '"token": 100002')), \
         "placeholder MCX tokens must be gone"
     print("PASS: GOLD/SILVER resolve to the nearest live future with correct per-lot multipliers.")
-
-def audit_start_price_anchor():
-    print("\n==================================================")
-    print("8. AUDITING CUSTOM START PRICE ANCHOR")
-    print("==================================================")
-    with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
-        html = f.read()
-    # prepare() and the per-day reset in step() must share one guarded rule
-    assert "c.source === 'market' || !(c.startPrice > 0)" in html, "anchorFor guard missing"
-    assert html.count("anchorFor(") >= 3, "prepare() and step() must both use anchorFor()"
-    assert "anchorPrice=c.source==='market'?b.c:c.startPrice" not in html, "unguarded anchor is back in step()"
-    print("PASS: a 0 start price falls back to the market price in both prepare() and step().")
-
-def audit_session_priority_and_key_errors():
-    """
-    A stale CHOICE_SESSION_ID (Choice sessions die daily) must never beat a
-    fresh 1-Click Login, the browser's X-Session-Id must win on serverless
-    hosts, and a Choice "VendorId or VendorKey invalid" 401 must tell the user
-    to renew the API key. Choice is stubbed; nothing leaves the machine.
-    """
-    print("\n==================================================")
-    print("9. AUDITING SESSION PRIORITY & REJECTED-KEY MESSAGE")
-    print("==================================================")
-    import server
-
-    saved_state, saved_env = dict(server.auth_state), os.environ.get("CHOICE_SESSION_ID")
-    saved_post = server.requests.post
-    try:
-        os.environ["CHOICE_SESSION_ID"] = "STALE_ENV_SESSION"
-        server.auth_state.update({"vendor_id": "V1", "api_key": "K1", "session_id": "FRESH_LOGIN_SESSION"})
-        with app.test_request_context('/'):
-            assert server.extract_credentials({}, server.request)["session_id"] == "FRESH_LOGIN_SESSION", \
-                "a fresh login session must outrank a stale CHOICE_SESSION_ID"
-        with app.test_request_context('/', headers={"X-Session-Id": "BROWSER_SESSION"}):
-            assert server.extract_credentials({}, server.request)["session_id"] == "BROWSER_SESSION", \
-                "the browser's X-Session-Id must win (serverless instances share no memory)"
-        server.auth_state["session_id"] = ""
-        with app.test_request_context('/'):
-            assert server.extract_credentials({}, server.request)["session_id"] == "STALE_ENV_SESSION", \
-                "CHOICE_SESSION_ID must still be used when nothing fresher exists"
-        print("PASS: browser session > fresh login > CHOICE_SESSION_ID.")
-
-        class Resp:
-            def __init__(self, code, text):
-                self.status_code, self.text = code, text
-            def json(self):
-                return {}
-        server.auth_state["session_id"] = "FRESH_LOGIN_SESSION"
-        client = app.test_client()
-        body = {"segment_id": 1, "token": 26000, "from_date": "2026-11-18", "to_date": "2026-11-18", "interval": "5"}
-        server.requests.post = lambda *a, **k: Resp(401, "Unauthorized, VendorId or VendorKey Invalid or doesn't exists.")
-        r = client.post('/api/historical', json=body)
-        d = r.get_json()
-        assert r.status_code == 401 and d["reason"] == "api_key_rejected", d
-        assert "expired" in d["message"] and "/admin/bootstrap" in d["message"], "must explain how to renew the key"
-        server.requests.post = lambda *a, **k: Resp(401, "Session expired")
-        d = client.post('/api/historical', json=body).get_json()
-        assert d["reason"] == "unauthorized" and "1-Click Login" in d["message"], d
-        print("PASS: a rejected API key and an expired session get clear, different messages.")
-    finally:
-        server.requests.post = saved_post
-        server.auth_state.clear()
-        server.auth_state.update(saved_state)
-        if saved_env is None:
-            os.environ.pop("CHOICE_SESSION_ID", None)
-        else:
-            os.environ["CHOICE_SESSION_ID"] = saved_env
-
-    with open(os.path.join(ROOT, INDEX_FILE), "r", encoding="utf-8") as f:
-        html = f.read()
-    for needle in ("saveDaySession(data.session_id)", "headers['X-Session-Id'] = sid",
-                   "fetch('/api/auth/status', { headers: getAuthHeaders() })"):
-        assert needle in html, f"browser session handling missing: {needle}"
-    hist = html[html.index("fetch('/api/historical'"):][:200]
-    assert "getAuthHeaders()" in hist, "candle fetch must send the day's session"
-    print("PASS: the browser saves today's session at login and sends it with every request.")
-
-def audit_login_otp_guard():
-    """
-    Every real Choice login sends an OTP to the registered mobile. 1-Click
-    Login must reuse today's session, refuse repeat/concurrent logins, and a
-    failed SDK login must never be retried by the fallback flow (second OTP).
-    Choice is replaced by a counting fake; nothing leaves the machine.
-    """
-    print("\n==================================================")
-    print("10. AUDITING LOGIN OTP GUARD (NO REPEATED OTPs)")
-    print("==================================================")
-    import tempfile
-    import server
-
-    calls = {"sdk": 0, "http": 0}
-    class FakeClient:
-        fail = False
-        def __init__(self, vendor_id, api_key, base_url):
-            self.session_id, self.access_token = None, None
-        def login(self, mobile):
-            calls["sdk"] += 1
-            if FakeClient.fail:
-                raise Exception("ValidateTOTP failed")
-            self.session_id = f"SESSION_{calls['sdk']}"
-            return self.session_id
-    def fake_post(*a, **k):
-        calls["http"] += 1
-        raise AssertionError("fallback login must not run when the SDK is installed")
-
-    tmp = tempfile.mkdtemp()
-    saved = (server.ChoiceClient if server.HAS_CHOICE_PKG else None, server.HAS_CHOICE_PKG, server.requests.post,
-             server.SESSION_FILE, server.SECRETS_FILE, dict(server.auth_state), server.choice_client,
-             dict(server._last_login_attempt))
-    client = app.test_client()
-    login = lambda body=None, headers=None: client.post('/api/auth/login_auto', json=body or {}, headers=headers or {})
-    try:
-        server.ChoiceClient, server.HAS_CHOICE_PKG, server.requests.post = FakeClient, True, fake_post
-        server.SESSION_FILE = os.path.join(tmp, "session.json")
-        server.SECRETS_FILE = os.path.join(tmp, "secrets.json")
-        server.auth_state.update({"vendor_id": "V1", "api_key": "K1", "mobile_no": "9999999999",
-                                  "session_id": "", "session_date": ""})
-        server._last_login_attempt["at"] = 0.0
-
-        r = login()
-        assert r.status_code == 200 and not r.get_json().get("reused") and calls["sdk"] == 1, r.get_json()
-        assert server.auth_state["session_date"] == datetime.date.today().isoformat()
-        for _ in range(3):  # pressing 1-Click Login again the same day
-            r = login()
-            assert r.status_code == 200 and r.get_json()["reused"] is True, r.get_json()
-        assert calls["sdk"] == 1, f"repeat clicks must reuse today's session, not log in again ({calls['sdk']} logins)"
-        print("PASS: repeat clicks reuse today's session — 1 login, 1 OTP.")
-
-        # A Vercel instance that never saw the login: the browser's session is reused
-        server.auth_state.update({"session_id": "", "session_date": ""})
-        r = login(headers={"X-Session-Id": "BROWSER_SESSION"})
-        assert r.get_json()["reused"] is True and r.get_json()["session_id"] == "BROWSER_SESSION" and calls["sdk"] == 1
-        # A session from an earlier day (e.g. a stale CHOICE_SESSION_ID) is not reused
-        server.auth_state.update({"session_id": "OLD", "session_date": "2020-01-01"})
-        r = login()
-        assert r.status_code == 429 and calls["sdk"] == 1, "a second real login inside the cool-down must be refused"
-        server._last_login_attempt["at"] = 0.0
-        r = login()
-        assert r.status_code == 200 and not r.get_json().get("reused") and calls["sdk"] == 2, "a stale session must not be reused"
-        print("PASS: browser session reused; old sessions are not; cool-down blocks a quick second OTP.")
-
-        r = login({"force": True})
-        assert r.status_code == 200 and calls["sdk"] == 3, "force must log in even with a session"
-        assert server._login_lock.acquire(blocking=False)
-        try:
-            server.auth_state.update({"session_id": "", "session_date": ""})
-            server._last_login_attempt["at"] = 0.0
-            assert login().status_code == 429 and calls["sdk"] == 3, "a concurrent login must be refused"
-        finally:
-            server._login_lock.release()
-
-        FakeClient.fail = True
-        server._last_login_attempt["at"] = 0.0
-        r = login()
-        assert r.status_code == 502 and calls["sdk"] == 4 and calls["http"] == 0, \
-            "a failed SDK login must not be retried by the fallback (that sends a second OTP)"
-        print("PASS: force works, concurrent logins refused, failed login sends only one OTP.")
-    finally:
-        (cc, server.HAS_CHOICE_PKG, server.requests.post, server.SESSION_FILE, server.SECRETS_FILE) = saved[:5]
-        if cc is not None:
-            server.ChoiceClient = cc
-        server.auth_state.clear()
-        server.auth_state.update(saved[5])
-        server.choice_client = saved[6]
-        server._last_login_attempt.update(saved[7])
 
 if __name__ == "__main__":
     audit_html_dom()
@@ -693,9 +512,6 @@ if __name__ == "__main__":
     audit_tax_and_cost_models()
     audit_multi_target_simultaneous_fill()
     audit_mcx_contract_resolution()
-    audit_start_price_anchor()
-    audit_session_priority_and_key_errors()
-    audit_login_otp_guard()
     print("\n==================================================")
     print("🎉 DEEP SYSTEM AUDIT COMPLETE — ALL CHECKS PASSED!")
     print("==================================================")
