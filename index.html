@@ -694,10 +694,31 @@
   // The browser no longer stores API Keys or Client IDs.
   // It only relies on the backend `server.py` state or cookies/session matching.
   
+  // Choice issues one session per trading day. On Vercel every request can be
+  // answered by a different server instance that never saw this browser's
+  // 1-Click Login (and cannot save it to disk), so the browser keeps today's
+  // session id and sends it along. API keys and Client IDs stay server-side.
+  const SESSION_KEY = 'grotChoiceSession';
+  function loadDaySession() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      if (s && s.id && s.day === dateKey(new Date())) return s.id;
+      localStorage.removeItem(SESSION_KEY); // yesterday's session is dead
+    } catch (e) { /* storage blocked: fall back to the server's own session */ }
+    return '';
+  }
+  function saveDaySession(id) {
+    try { if (id) localStorage.setItem(SESSION_KEY, JSON.stringify({ id: String(id), day: dateKey(new Date()) })); } catch (e) {}
+  }
+  function clearDaySession() {
+    try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+  }
+
   function getAuthHeaders() {
-    return {
-      'Content-Type': 'application/json'
-    };
+    const headers = { 'Content-Type': 'application/json' };
+    const sid = loadDaySession();
+    if (sid) headers['X-Session-Id'] = sid;
+    return headers;
   }
 
   function setModalAuthMsg(text, tone) {
@@ -709,7 +730,7 @@
 
   async function checkAuthStatus() {
     try {
-      const res = await fetch('/api/auth/status');
+      const res = await fetch('/api/auth/status', { headers: getAuthHeaders() });
       const data = await res.json();
 
       if(data.logged_in && data.has_session) {
@@ -749,6 +770,8 @@
       });
       const data = await res.json();
       if(data.status === 'success') {
+        saveDaySession(data.session_id);
+        // data.reused: today's session was reused and Choice sent no new OTP
         setModalAuthMsg(data.message || 'Login successful.', 'ok');
         closeAuthModal();
         checkAuthStatus();
@@ -965,12 +988,17 @@
     try {
       const res = await fetch('/api/historical', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       });
       const data = await res.json();
+      if(res.status === 401 && data.reason !== 'api_key_rejected') {
+        // The session was refused: drop it so the next 1-Click Login does one
+        // real login. A rejected API key keeps it, because logging in again
+        // cannot fix the key and would only send another OTP.
+        clearDaySession();
+        checkAuthStatus();
+      }
 
       if(data.status === 'success' && data.bars && data.bars.length) {
         loadedBars = data.bars.map(b => ({
